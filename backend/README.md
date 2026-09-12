@@ -114,6 +114,35 @@ moves the incident to `diagnosed`; an in-progress report moves it to `investigat
 Resolved incidents reject new reports. Rollback and code-change recommendations must
 retain `requires_operator_approval: true`; this endpoint never executes remediation.
 
+## NemoClaw incident worker
+
+The host-side worker connects the existing `blackbox-agent` NemoClaw sandbox to those
+HTTP endpoints. It polls open incidents, fetches the full handoff, marks the incident
+as investigating, runs one bounded agent turn, validates the structured output, and
+posts the completed or failed report back to the application. It never connects to
+MongoDB directly.
+
+```sh
+export BLACKBOX_API_URL=http://127.0.0.1:8000
+export NEMOCLAW_SANDBOX_NAME=blackbox-agent
+export NEMOCLAW_GATEWAY_PORT=8990
+
+bash scripts/install-nemoclaw-skill.sh
+.venv/bin/python -m backend.incident_agent.worker --check
+.venv/bin/python -m backend.incident_agent.worker
+```
+
+Use `--once` to process at most one open incident. Run the worker on the host: the
+bounded incident is passed to the sandbox for analysis, so the sandbox needs no
+MongoDB credentials and no direct network route back to the Blackbox API.
+
+For an interactive investigation, the installed `blackbox-health` and
+`blackbox-incidents` skills call the same API directly from the sandbox through
+`http://host.openshell.internal:8001`. Compose binds only the configured Docker
+bridge address (`AGENT_HTTP_HOST`), and the NemoClaw policy restricts the sandbox to
+health, incident reads, and investigation creation. Keep `HTTP_PORT=8001` when using
+that existing policy, or update the policy and skill URLs together.
+
 Tests use a real MongoDB and create/drop only randomly named `blackbox_test_*` databases:
 
 ```sh

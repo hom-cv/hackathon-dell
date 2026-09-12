@@ -613,7 +613,10 @@ def create_app(
         if incident.get("state") == "resolved":
             raise HTTPException(409, "Resolved incidents do not accept new investigations.")
 
-        now = datetime.now(timezone.utc)
+        # Match MongoDB's millisecond BSON precision so the create response is
+        # byte-for-byte consistent with an immediate investigation read.
+        current = datetime.now(timezone.utc)
+        now = current.replace(microsecond=(current.microsecond // 1000) * 1000)
         investigation_id = f"investigation-{uuid4().hex[:12]}"
         document = {
             "_id": investigation_id,

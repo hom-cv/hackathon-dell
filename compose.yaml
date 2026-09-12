@@ -43,6 +43,9 @@ services:
       DETECTION_INTERVAL_SECONDS: ${DETECTION_INTERVAL_SECONDS:-2}
     ports:
       - "${HTTP_HOST:-127.0.0.1}:${HTTP_PORT:-8000}:8000"
+      # A separate bridge-only binding lets the policy-constrained NemoClaw sandbox
+      # reach the same API while preserving the operator's loopback URL.
+      - "${AGENT_HTTP_HOST:-127.0.0.1}:${AGENT_HTTP_PORT:-8001}:8000"
     depends_on:
       mongodb:
         condition: service_healthy

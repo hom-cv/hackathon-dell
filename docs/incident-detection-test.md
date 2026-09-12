@@ -190,6 +190,24 @@ curl --fail 'http://localhost:8000/api/incidents?state=open&limit=20'
 curl --fail http://localhost:8000/api/incidents/INCIDENT_ID
 ```
 
+Connect the running NemoClaw sandbox to the handoff and investigation endpoints from
+a second host terminal (adjust the API port if this deployment uses another one):
+
+```sh
+export BLACKBOX_API_URL=http://127.0.0.1:8000
+export NEMOCLAW_SANDBOX_NAME=blackbox-agent
+export NEMOCLAW_GATEWAY_PORT=8990
+
+bash scripts/install-nemoclaw-skill.sh
+.venv/bin/python -m backend.incident_agent.worker --once
+curl --fail http://localhost:8000/api/incidents/INCIDENT_ID/investigations
+```
+
+The host worker marks the incident `investigating`, passes only the HTTP handoff
+document into NemoClaw, validates the response, and creates the final investigation
+through `POST /api/incidents/{id}/investigations`. It does not give the sandbox
+MongoDB credentials or remediation access.
+
 Verify deduplication by waiting for more detector evaluations and confirming only one
 incident exists for this run, deployment, and rule.
 
