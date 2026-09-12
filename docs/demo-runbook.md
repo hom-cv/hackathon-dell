@@ -1,8 +1,8 @@
 # Healbot demo runbook
 
 Run everything from the repository root. Use a **new run ID for every rehearsal**.
-This walkthrough uses the existing healthy and bad-join commits on `main`; it does
-not use the agent-integration branch. Compose commands use `sg docker` because the
+This walkthrough uses healthy `main` and the dedicated `bad-join-demo` branch; it
+does not use the agent-integration branch. Compose commands use `sg docker` because the
 GB10 login session may not have refreshed its Docker group membership yet.
 
 ## Before the audience arrives
@@ -51,7 +51,7 @@ http://localhost:8001/admin
 ### 1. Deploy the known N+1 regression — Terminal 1
 
 ```sh
-git switch --detach e3f687c
+git switch bad-join-demo
 export DEPLOYMENT_ID=dep-bad-join
 export GIT_SHA="$(git rev-parse HEAD)"
 sg docker -c 'docker compose up --build -d --wait'
