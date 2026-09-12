@@ -71,3 +71,15 @@ The MVP focuses on one complete loop: **detect → investigate → diagnose → 
 - [`frontend/`](frontend/) — frontend scaffold.
 
 Setup and run instructions will be added as the implementation lands.
+
+
+# For Hom
+```
+whoami
+printf 'HOME=%s\n' "$HOME"
+command -v node npm
+npm prefix -g
+ls -l "$HOME/.local/bin/nemoclaw" /usr/local/bin/nemoclaw
+sudo find /root /home/dell /usr/local /opt -name nemoclaw -type l -print 2>/
+dev/null
+```
