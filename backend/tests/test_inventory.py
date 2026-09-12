@@ -226,3 +226,116 @@ def test_query_regression_creates_one_deduplicated_incident(mongo):
     repeated = detector.evaluate(now)
     assert repeated["id"] == incident["id"]
     assert database.incidents.count_documents({}) == 1
+
+
+def test_agent_can_query_and_fetch_incidents(mongo, monkeypatch):
+    uri, database_name, connection = mongo
+    monkeypatch.setenv("DEMO_RUN_ID", "agent-ingest-test")
+    app = create_app(uri, database_name, database_name)
+    with TestClient(app) as client:
+        now = datetime.now(timezone.utc)
+        connection[database_name].incidents.insert_many([
+            {
+                "_id": "incident-open",
+                "id": "incident-open",
+                "demo_run_id": "agent-ingest-test",
+                "state": "open",
+                "severity": "critical",
+                "rule": "database_query_regression",
+                "summary": "Open regression",
+                "service": "inventory",
+                "route": "/api/items",
+                "deployment_id": "dep-bad",
+                "git_sha": "b" * 40,
+                "created_at": now,
+                "updated_at": now,
+                "evidence_trace_ids": ["trace-1"],
+                "dedup_key": "agent-ingest-test:open",
+            },
+            {
+                "_id": "incident-resolved",
+                "id": "incident-resolved",
+                "demo_run_id": "agent-ingest-test",
+                "state": "resolved",
+                "severity": "critical",
+                "rule": "latency_regression",
+                "summary": "Resolved regression",
+                "service": "inventory",
+                "route": "/api/items",
+                "deployment_id": "dep-old",
+                "git_sha": "a" * 40,
+                "created_at": now - timedelta(minutes=1),
+                "updated_at": now,
+                "dedup_key": "agent-ingest-test:resolved",
+            },
+        ])
+
+        open_response = client.get("/api/incidents")
+        assert open_response.status_code == 200
+        assert open_response.json()["count"] == 1
+        assert open_response.json()["incidents"][0]["id"] == "incident-open"
+        assert open_response.json()["incidents"][0]["handoff_url"] == "/api/incidents/incident-open"
+
+        all_response = client.get("/api/incidents", params={"state": "all", "limit": 10})
+        assert all_response.status_code == 200
+        assert all_response.json()["count"] == 2
+
+        detail = client.get("/api/incidents/incident-open")
+        assert detail.status_code == 200
+        assert detail.json()["evidence_trace_ids"] == ["trace-1"]
+        assert client.get("/api/incidents/missing").status_code == 404
+
+        report_payload = {
+            "agent_id": "investigator-local",
+            "model_name": "local-sre-model",
+            "status": "completed",
+            "summary": "Correlated the regression with the deployment diff.",
+            "diagnosis": "A supplier lookup inside the item loop caused an N+1 query regression.",
+            "confidence": 0.98,
+            "actions_taken": [
+                {"kind": "query_telemetry", "summary": "Compared database-query counts."},
+                {"kind": "inspect_git_diff", "summary": "Inspected the deployment diff."},
+            ],
+            "evidence": [{
+                "kind": "trace",
+                "reference": "trace-1",
+                "summary": "The request issued repeated supplier lookups.",
+            }],
+            "recommendations": [{
+                "kind": "rollback",
+                "summary": "Roll back the N+1 join.",
+                "rationale": "The previous deployment used one indexed lookup.",
+                "target": "dep-healthy",
+                "requires_operator_approval": True,
+            }],
+        }
+        created_report = client.post(
+            "/api/incidents/incident-open/investigations", json=report_payload,
+        )
+        assert created_report.status_code == 201
+        assert created_report.json()["incident_id"] == "incident-open"
+        assert created_report.json()["status"] == "completed"
+
+        stored_incident = connection[database_name].incidents.find_one({"_id": "incident-open"})
+        assert stored_incident["state"] == "diagnosed"
+        assert stored_incident["investigation_count"] == 1
+        assert stored_incident["latest_investigation_id"] == created_report.json()["id"]
+
+        reports = client.get("/api/incidents/incident-open/investigations")
+        assert reports.status_code == 200
+        assert reports.json() == [created_report.json()]
+        diagnosed = client.get("/api/incidents", params={"state": "diagnosed"})
+        assert diagnosed.json()["incidents"][0]["id"] == "incident-open"
+
+        unsafe_recommendation = {
+            **report_payload,
+            "recommendations": [{
+                "kind": "code_change",
+                "summary": "Change the query.",
+                "rationale": "Restore one indexed lookup.",
+                "requires_operator_approval": False,
+            }],
+        }
+        assert client.post(
+            "/api/incidents/incident-open/investigations", json=unsafe_recommendation,
+        ).status_code == 422

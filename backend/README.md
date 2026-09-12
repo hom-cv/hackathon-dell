@@ -11,7 +11,10 @@ The starter FastAPI app connects to MongoDB and serves the basic frontend from t
 | DELETE | `/api/items/{sku}` | Deletes an item; missing SKU returns 404. Suppliers are retained. |
 | GET | `/api/suppliers` | Lists suppliers alphabetically. |
 | POST | `/api/suppliers` | Creates a supplier from `{name}`; names are unique ignoring case. |
+| GET | `/api/incidents` | Lists incidents for the active run; supports `state` and `limit` filters. |
 | GET | `/api/incidents/{id}` | Returns one incident and its supporting evidence for agent handoff. |
+| GET | `/api/incidents/{id}/investigations` | Lists structured agent reports for an incident. |
+| POST | `/api/incidents/{id}/investigations` | Appends an agent investigation report and updates incident state. |
 | GET | `/docs` | Interactive OpenAPI documentation. |
 
 SKU is normalized to uppercase. Stock must be an integer from 0 to 1,000,000. New items may include a valid `supplier_id`. The item dialog lets operators select an existing supplier or type a new supplier name, which creates the supplier before the item. Responses include `created_at` and `updated_at` UTC timestamps and do not expose MongoDB `_id` values.
@@ -61,6 +64,55 @@ latency threshold (`max(3 × baseline, 100 ms)`) or the mean database-query thre
 deployment, and rule. Set a fresh `DEMO_RUN_ID`, plus `DEPLOYMENT_ID` and the full
 `GIT_SHA`, for each reproducible demo so the eventual investigation can correlate the
 incident with its deployment and source diff.
+
+An agent can poll open incidents and then fetch the full evidence document:
+
+```sh
+curl --fail 'http://localhost:8000/api/incidents?state=open&limit=20'
+curl --fail 'http://localhost:8000/api/incidents/INCIDENT_ID'
+```
+
+The collection response contains compact incident summaries and a `handoff_url` for
+each result. Use `state=investigating`, `state=diagnosed`, `state=resolved`, or
+`state=all` when needed.
+
+Agents append investigation activity and recommendations with:
+
+```sh
+curl --fail -X POST \
+  -H 'Content-Type: application/json' \
+  http://localhost:8000/api/incidents/INCIDENT_ID/investigations \
+  --data '{
+    "agent_id": "investigator-local",
+    "model_name": "local-sre-model",
+    "status": "completed",
+    "summary": "Correlated the regression with its deployment.",
+    "diagnosis": "A lookup inside the item loop caused an N+1 regression.",
+    "confidence": 0.98,
+    "actions_taken": [
+      {"kind": "query_telemetry", "summary": "Compared query counts."},
+      {"kind": "inspect_git_diff", "summary": "Inspected the deployment diff."}
+    ],
+    "evidence": [
+      {"kind": "trace", "reference": "TRACE_ID", "summary": "Repeated lookups."}
+    ],
+    "recommendations": [
+      {
+        "kind": "rollback",
+        "summary": "Roll back the bad join.",
+        "rationale": "The previous revision used one indexed lookup.",
+        "target": "dep-healthy",
+        "requires_operator_approval": true
+      }
+    ]
+  }'
+```
+
+Reports intentionally store concise evidence-backed findings rather than private
+chain-of-thought or raw model transcripts. They are append-only. A completed report
+moves the incident to `diagnosed`; an in-progress report moves it to `investigating`.
+Resolved incidents reject new reports. Rollback and code-change recommendations must
+retain `requires_operator_approval: true`; this endpoint never executes remediation.
 
 Tests use a real MongoDB and create/drop only randomly named `blackbox_test_*` databases:
 

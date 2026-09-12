@@ -186,6 +186,7 @@ docker compose exec -T mongodb sh -lc \
 Use the incident's `id` for the read-only agent handoff endpoint:
 
 ```sh
+curl --fail 'http://localhost:8000/api/incidents?state=open&limit=20'
 curl --fail http://localhost:8000/api/incidents/INCIDENT_ID
 ```
 

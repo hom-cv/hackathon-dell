@@ -4,15 +4,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
+from typing import Literal
 from urllib.parse import quote_plus
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
@@ -79,6 +80,63 @@ class Item(BaseModel):
     created_at: datetime
     updated_at: datetime
     supplier: Supplier | None = None
+
+
+class EvidenceReference(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    kind: Literal["log", "trace", "baseline", "deployment", "git_diff", "source"]
+    reference: str = Field(min_length=1, max_length=500)
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class AgentActivity(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    kind: Literal[
+        "query_telemetry", "inspect_deployment", "inspect_git_diff",
+        "inspect_source", "correlate_evidence", "other",
+    ]
+    summary: str = Field(min_length=1, max_length=1000)
+
+
+class Recommendation(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    kind: Literal["rollback", "code_change", "monitor", "none"]
+    summary: str = Field(min_length=1, max_length=1000)
+    rationale: str = Field(min_length=1, max_length=2000)
+    target: str | None = Field(default=None, max_length=500)
+    requires_operator_approval: bool = True
+
+    @model_validator(mode="after")
+    def protect_mutating_recommendations(self):
+        if self.kind in {"rollback", "code_change"} and not self.requires_operator_approval:
+            raise ValueError("rollback and code-change recommendations require operator approval")
+        return self
+
+
+class InvestigationSubmission(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    agent_id: str = Field(min_length=1, max_length=100)
+    model_name: str = Field(min_length=1, max_length=200)
+    status: Literal["in_progress", "completed", "failed"]
+    summary: str = Field(min_length=1, max_length=2000)
+    diagnosis: str | None = Field(default=None, max_length=5000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    actions_taken: list[AgentActivity] = Field(default_factory=list, max_length=50)
+    evidence: list[EvidenceReference] = Field(default_factory=list, max_length=100)
+    recommendations: list[Recommendation] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_completed_findings(self):
+        if self.status == "completed" and (not self.diagnosis or self.confidence is None):
+            raise ValueError("completed investigations require diagnosis and confidence")
+        return self
+
+
+class Investigation(InvestigationSubmission):
+    id: str
+    incident_id: str
+    demo_run_id: str
+    created_at: datetime
 
 
 SEED_ITEMS = [
@@ -172,6 +230,9 @@ def create_app(
             evidence.incidents.create_index("dedup_key", unique=True)
             evidence.incidents.create_index(
                 [("demo_run_id", 1), ("state", 1), ("created_at", -1)]
+            )
+            evidence.investigations.create_index(
+                [("demo_run_id", 1), ("incident_id", 1), ("created_at", 1)]
             )
             queue_size = max(1, int(os.getenv("TELEMETRY_QUEUE_SIZE", "10000")))
             app.state.telemetry = TelemetryWriter(logs, queue_size=queue_size)
@@ -446,6 +507,45 @@ def create_app(
             },
         }
 
+    @app.get("/api/incidents")
+    def list_incidents(
+        request: Request,
+        state: Literal["open", "investigating", "diagnosed", "resolved", "all"] = "open",
+        limit: int = Query(default=50, ge=1, le=100),
+    ):
+        run_id = os.getenv("DEMO_RUN_ID", "local")
+        filters = {"demo_run_id": run_id}
+        if state != "all":
+            filters["state"] = state
+        documents = database_call(
+            request,
+            "incident-list",
+            lambda: list(
+                request.app.state.evidence.incidents.find(filters, {
+                    "_id": 0,
+                    "id": 1,
+                    "service": 1,
+                    "route": 1,
+                    "deployment_id": 1,
+                    "git_sha": 1,
+                    "state": 1,
+                    "severity": 1,
+                    "rule": 1,
+                    "summary": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                }).sort("created_at", -1).limit(limit)
+            ),
+        )
+        for document in documents:
+            document["handoff_url"] = f"/api/incidents/{document['id']}"
+        return {
+            "demo_run_id": run_id,
+            "state": state,
+            "count": len(documents),
+            "incidents": documents,
+        }
+
     @app.get("/api/incidents/{incident_id}")
     def incident_detail(incident_id: str, request: Request):
         incident = database_call(
@@ -459,6 +559,99 @@ def create_app(
         if incident is None:
             raise HTTPException(404, "Incident not found.")
         return incident
+
+    @app.get(
+        "/api/incidents/{incident_id}/investigations",
+        response_model=list[Investigation],
+    )
+    def list_investigations(
+        incident_id: str,
+        request: Request,
+        limit: int = Query(default=50, ge=1, le=100),
+    ):
+        run_id = os.getenv("DEMO_RUN_ID", "local")
+        incident = database_call(
+            request,
+            "incident-exists",
+            lambda: request.app.state.evidence.incidents.find_one(
+                {"_id": incident_id, "demo_run_id": run_id}, {"_id": 1}
+            ),
+        )
+        if incident is None:
+            raise HTTPException(404, "Incident not found.")
+        return database_call(
+            request,
+            "investigation-list",
+            lambda: list(
+                request.app.state.evidence.investigations.find(
+                    {"demo_run_id": run_id, "incident_id": incident_id},
+                    {"_id": 0, "schema_version": 0},
+                ).sort("created_at", 1).limit(limit)
+            ),
+        )
+
+    @app.post(
+        "/api/incidents/{incident_id}/investigations",
+        response_model=Investigation,
+        status_code=201,
+    )
+    def create_investigation(
+        incident_id: str,
+        submission: InvestigationSubmission,
+        request: Request,
+    ):
+        run_id = os.getenv("DEMO_RUN_ID", "local")
+        incident = database_call(
+            request,
+            "incident-for-investigation",
+            lambda: request.app.state.evidence.incidents.find_one(
+                {"_id": incident_id, "demo_run_id": run_id}, {"state": 1}
+            ),
+        )
+        if incident is None:
+            raise HTTPException(404, "Incident not found.")
+        if incident.get("state") == "resolved":
+            raise HTTPException(409, "Resolved incidents do not accept new investigations.")
+
+        now = datetime.now(timezone.utc)
+        investigation_id = f"investigation-{uuid4().hex[:12]}"
+        document = {
+            "_id": investigation_id,
+            "id": investigation_id,
+            "schema_version": 1,
+            "demo_run_id": run_id,
+            "incident_id": incident_id,
+            "created_at": now,
+            **submission.model_dump(),
+        }
+        database_call(
+            request,
+            "investigation-insert",
+            lambda: request.app.state.evidence.investigations.insert_one(document.copy()),
+        )
+        incident_state = {
+            "in_progress": "investigating",
+            "completed": "diagnosed",
+            "failed": incident.get("state", "open"),
+        }[submission.status]
+        database_call(
+            request,
+            "incident-investigation-update",
+            lambda: request.app.state.evidence.incidents.update_one(
+                {"_id": incident_id, "demo_run_id": run_id},
+                {
+                    "$set": {
+                        "state": incident_state,
+                        "updated_at": now,
+                        "latest_investigation_id": investigation_id,
+                    },
+                    "$inc": {"investigation_count": 1},
+                },
+            ),
+        )
+        document.pop("_id")
+        document.pop("schema_version")
+        return document
 
     @app.get("/", include_in_schema=False)
     def frontend():
