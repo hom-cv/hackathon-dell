@@ -78,4 +78,10 @@ python3 scripts/configure.py
 docker compose up --build -d --wait
 ```
 
+The application MongoDB connection string is:
+
+```text
+mongodb://blackbox_app:<MONGO_APP_PASSWORD>@127.0.0.1:27017/shop?authSource=admin
+```
+
 Open [the monitoring dashboard](http://localhost:8000), [simulated agent scenarios](http://localhost:8000/?mode=demo), [the inventory demo](http://localhost:8000/inventory), or [API documentation](http://localhost:8000/docs). Live mode shows inventory/database readiness and explicitly marks the planned agent APIs as unavailable until they are implemented. MongoDB data persists in a named volume. The browser talks to the API; database credentials stay on the server.
