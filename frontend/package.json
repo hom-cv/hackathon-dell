@@ -1,0 +1,11 @@
+{
+  "name": "blackbox-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules --test tests/*.test.mjs",
+    "preview": "node dashboard/preview.mjs"
+  },
+  "devDependencies": { "jsdom": "26.1.0" }
+}

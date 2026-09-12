@@ -131,8 +131,13 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
         return document
 
     @app.get("/", include_in_schema=False)
+    @app.get("/dashboard", include_in_schema=False)
     def frontend():
         return FileResponse(ROOT / "frontend" / "index.html")
+
+    @app.get("/inventory", include_in_schema=False)
+    def inventory_frontend():
+        return FileResponse(ROOT / "frontend" / "inventory.html")
 
     app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
     return app

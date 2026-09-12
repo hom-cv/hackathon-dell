@@ -3,52 +3,46 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Inventory | Blackbox</title>
-  <link rel="icon" href="/static/assets/icons/package.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js" defer></script>
+  <meta name="theme-color" content="#111315">
+  <meta name="description" content="Blackbox local incident response: service health, agent actions, evidence, and verified recovery.">
+  <title>Agent overview | Blackbox</title>
+  <link rel="icon" href="/static/assets/icons/box.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/dashboard/dashboard.css">
+  <script src="/static/dashboard/app.mjs" type="module"></script>
 </head>
 <body>
-  <header class="app-header">
-    <a class="brand" href="/"><img src="/static/assets/icons/package.svg" alt="" width="22" height="22">Blackbox <span>Inventory demo</span></a>
-    <span id="connection" class="connection" role="status"><span class="dot"></span><span id="connection-label">Connecting</span></span>
-  </header>
-  <main>
-    <div class="page-heading"><div><p class="eyebrow">WORKSPACE / SHOP</p><h1>Inventory</h1></div><button id="add-item" class="primary" type="button"><img src="/static/assets/icons/plus.svg" alt="">Add item</button></div>
-    <section class="summary" aria-label="Inventory totals">
-      <div><span>Total items</span><strong id="total-items">--</strong></div>
-      <div><span>Units available</span><strong id="total-stock">--</strong></div>
-      <div><span>Out of stock</span><strong id="out-of-stock">--</strong></div>
-    </section>
-    <div class="toolbar">
-      <label class="search"><img src="/static/assets/icons/search.svg" alt=""><input id="search" type="search" placeholder="Search items or SKU" aria-label="Search items or SKU"></label>
-      <div class="toolbar-actions"><select id="stock-filter" aria-label="Stock status"><option value="all">All stock</option><option value="available">In stock</option><option value="low">Low stock</option><option value="out">Out of stock</option></select><button id="refresh" class="icon-button" type="button" title="Refresh inventory" aria-label="Refresh inventory"><img src="/static/assets/icons/refresh-cw.svg" alt=""></button></div>
+  <a href="#content" class="skip-link">Skip to dashboard</a>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#overview"><span class="brand-mark"><img src="/static/assets/icons/box.svg" alt=""></span>blackbox<span class="brand-period">.</span></a>
+    <div class="workspace"><span class="workspace-avatar">B</span><div><strong>Blackbox workspace</strong><small>Local environment</small></div><span class="dot green"></span></div>
+    <p class="nav-label">WORKSPACE</p>
+    <nav aria-label="Main navigation">
+      <a href="#overview" data-view="overview"><img src="/static/assets/icons/overview.svg" alt="">Overview</a>
+      <a href="#incidents" data-view="incidents"><img src="/static/assets/icons/incident.svg" alt="">Incidents<span id="incident-count" class="nav-count" hidden>0</span></a>
+      <a href="#activity" data-view="activity"><img src="/static/assets/icons/terminal.svg" alt="">Agent activity</a>
+      <a href="#services" data-view="services"><img src="/static/assets/icons/server.svg" alt="">Services</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="runtime-card"><div><span class="dot" id="runtime-dot"></span><strong id="runtime-title">Connecting to environment</strong></div><p id="runtime-description">Checking the local API</p><span><img src="/static/assets/icons/shield.svg" alt="">Operator-controlled recovery</span></div>
+      <a class="sidebar-link" href="/inventory"><img src="/static/assets/icons/package.svg" alt="">Inventory demo<img src="/static/assets/icons/external.svg" alt=""></a>
+      <a class="sidebar-link" href="#settings" data-view="settings"><img src="/static/assets/icons/settings.svg" alt="">Settings</a>
+      <button class="sidebar-link" id="help"><img src="/static/assets/icons/help.svg" alt="">Quick guide</button>
+      <div class="operator"><span>OP</span><div><strong>Operator console</strong><small>Local workspace</small></div><img src="/static/assets/icons/shield.svg" alt=""></div>
     </div>
-    <p id="notice" class="notice" role="status"></p>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th scope="col">Item</th><th scope="col">SKU</th><th scope="col">Status</th><th scope="col" class="number">Stock</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-        <tbody id="inventory"><tr><td colspan="5" class="empty">Loading inventory...</td></tr></tbody>
-      </table>
-    </div>
-    <footer class="table-footer"><span id="result-count">-- items</span><span id="last-updated">Awaiting connection</span></footer>
-  </main>
-  <dialog id="item-dialog">
-    <form id="item-form">
-      <div class="dialog-heading"><h2 id="dialog-title">Add item</h2><button id="close-dialog" class="icon-button" type="button" title="Close" aria-label="Close"><img src="/static/assets/icons/x.svg" alt=""></button></div>
-      <label>Item name<input id="item-name" name="name" required maxlength="100" autocomplete="off"></label>
-      <label>SKU<input id="item-sku" name="sku" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" autocomplete="off" placeholder="e.g. KEY-006"></label>
-      <label>Stock<input id="item-stock" name="stock" type="number" required min="0" max="1000000" step="1" value="0"></label>
-      <p id="form-error" class="form-error" role="alert"></p>
-      <div class="dialog-actions"><button id="cancel-dialog" type="button">Cancel</button><button id="save-item" class="primary" type="submit">Add item</button></div>
-    </form>
-  </dialog>
-  <template id="item-row">
-    <tr>
-      <td><div class="item-name"><span class="item-icon"><img alt="" width="22" height="22"></span><span class="name"></span></div></td>
-      <td class="sku"></td><td><span class="stock-status"></span></td><td class="number stock"></td>
-      <td class="actions"><button class="icon-button edit-item" type="button"><img src="/static/assets/icons/pencil.svg" alt=""></button></td>
-    </tr>
-  </template>
+  </aside>
+  <button class="scrim" id="scrim" aria-label="Close navigation" hidden></button>
+  <div class="main-shell">
+    <header class="topbar"><div class="breadcrumbs"><button class="icon-button mobile-menu" id="menu" aria-label="Toggle navigation" aria-expanded="false"><img src="/static/assets/icons/menu.svg" alt=""></button><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb">Overview</strong></div><div class="topbar-actions"><span class="environment-tag" id="environment-tag">LOCAL</span><span class="separator"></span><button class="icon-button notification" id="notifications" aria-label="View pending approvals"><img src="/static/assets/icons/bell.svg" alt=""><span id="notification-dot" hidden></span></button><span class="avatar">OP</span></div></header>
+    <main id="content" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow">OPERATIONS CONSOLE</p><h1 id="page-title">Agent overview</h1><p id="page-description">Your systems. Your agent. Every action, in view.</p></div><div class="page-actions"><span class="feed-label" id="feed-label">Connecting</span><button class="button" id="refresh"><img src="/static/assets/icons/refresh-cw.svg" alt="">Refresh</button></div></div>
+      <div class="mode-bar"><div><span class="mode-label" id="mode-label">LIVE CONNECTION</span><span id="mode-description">Reading your local environment. Operational data stays local.</span></div><div class="mode-controls"><label>Data source<select id="data-mode"><option value="live">Live environment</option><option value="demo">Demo scenarios</option></select></label><label id="scenario-label" hidden>Scenario<select id="scenario"></select></label></div></div>
+      <div id="alerts" aria-live="polite"></div>
+      <div id="view"><div class="empty loading"><span class="spinner"></span><h3>Connecting to your operations feed…</h3></div></div>
+      <footer><span><img src="/static/assets/icons/shield.svg" alt="">BLACKBOX <i>/</i> Local incident response</span><span id="last-updated">Waiting for connection</span></footer>
+    </main>
+  </div>
+  <dialog id="detail-dialog" aria-labelledby="dialog-title"><div class="dialog-heading"><h2 id="dialog-title"></h2><button id="close-dialog" class="icon-button" aria-label="Close dialog"><img src="/static/assets/icons/x.svg" alt=""></button></div><div id="dialog-content"></div></dialog>
+  <div id="toast" role="status" hidden></div>
+  <noscript><div class="no-script">Enable JavaScript to view the monitoring dashboard. <a href="/docs">Open API documentation</a>.</div></noscript>
 </body>
 </html>

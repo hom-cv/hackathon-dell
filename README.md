@@ -4,7 +4,7 @@
 
 Blackbox is a hackathon project for an autonomous site reliability engineering (SRE) agent. It is designed to detect incidents, investigate telemetry and source changes, recommend controlled remediation, and verify recovery. AI inference and sensitive operational data stay on the Dell Pro Max GB10.
 
-**Status:** A MongoDB-backed inventory demo is implemented: a FastAPI backend, a basic browser frontend, and a Docker Compose deployment. Detection, investigation, and remediation below remain the planned MVP.
+**Status:** A MongoDB-backed inventory demo is implemented: a FastAPI backend, an inventory browser frontend, an operations dashboard, and a Docker Compose deployment. The dashboard supports the existing health API and explicit simulated agent scenarios. Detection, investigation, and remediation below remain the planned MVP.
 
 ## Why Blackbox
 
@@ -68,7 +68,7 @@ The MVP focuses on one complete loop: **detect → investigate → diagnose → 
 ## Repository
 
 - [`backend/`](backend/) — inventory API and database integration tests.
-- [`frontend/`](frontend/) — basic inventory browser UI.
+- [`frontend/`](frontend/) — monitoring dashboard and preserved inventory browser UI. See [dashboard integration](frontend/dashboard/API.md) for the proposed controller API.
 - [`docs/mongodb-setup.md`](docs/mongodb-setup.md) — local setup, frontend integration, and GB10 deployment.
 
 With Docker Engine and Compose available, run from the repository root:
@@ -78,4 +78,4 @@ python3 scripts/configure.py
 docker compose up --build -d --wait
 ```
 
-Open [the inventory demo](http://localhost:8000) or [API documentation](http://localhost:8000/docs). MongoDB data persists in a named volume. The browser talks to the API; database credentials stay on the server.
+Open [the monitoring dashboard](http://localhost:8000), [simulated agent scenarios](http://localhost:8000/?mode=demo), [the inventory demo](http://localhost:8000/inventory), or [API documentation](http://localhost:8000/docs). Live mode shows inventory/database readiness and explicitly marks the planned agent APIs as unavailable until they are implemented. MongoDB data persists in a named volume. The browser talks to the API; database credentials stay on the server.

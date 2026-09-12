@@ -5,3 +5,8 @@
 **/__pycache__
 .pytest_cache
 docs
+
+# Frontend development/test files are not needed by the static production UI.
+frontend/node_modules
+frontend/dist
+frontend/tests
