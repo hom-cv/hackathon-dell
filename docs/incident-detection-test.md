@@ -199,7 +199,7 @@ export NEMOCLAW_SANDBOX_NAME=blackbox-agent
 export NEMOCLAW_GATEWAY_PORT=8990
 
 bash scripts/install-nemoclaw-skill.sh
-.venv/bin/python -m backend.incident_agent.worker --once
+bash scripts/run-incident-worker.sh
 curl --fail http://localhost:8000/api/incidents/INCIDENT_ID/investigations
 ```
 

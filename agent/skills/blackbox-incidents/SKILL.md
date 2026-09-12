@@ -76,7 +76,7 @@ The JSON must contain:
 
 Allowed activity kinds are `query_telemetry`, `inspect_deployment`, `inspect_git_diff`,
 `inspect_source`, `correlate_evidence`, and `other`. Allowed evidence kinds are `log`,
-`trace`, `baseline`, `deployment`, `git_diff`, and `source`. Allowed recommendations
+`trace`, `metric`, `rule`, `baseline`, `deployment`, `git_diff`, and `source`. Allowed recommendations
 are `rollback`, `code_change`, `monitor`, and `none`.
 
 A completed report requires both `diagnosis` and `confidence`. If evidence is

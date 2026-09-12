@@ -84,7 +84,9 @@ class Item(BaseModel):
 
 class EvidenceReference(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    kind: Literal["log", "trace", "baseline", "deployment", "git_diff", "source"]
+    kind: Literal[
+        "log", "trace", "metric", "rule", "baseline", "deployment", "git_diff", "source",
+    ]
     reference: str = Field(min_length=1, max_length=500)
     summary: str = Field(min_length=1, max_length=1000)
 
@@ -137,6 +139,11 @@ class Investigation(InvestigationSubmission):
     incident_id: str
     demo_run_id: str
     created_at: datetime
+
+
+class IncidentClaimRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    agent_id: str = Field(min_length=1, max_length=100)
 
 
 SEED_ITEMS = [
@@ -559,6 +566,47 @@ def create_app(
         if incident is None:
             raise HTTPException(404, "Incident not found.")
         return incident
+
+    @app.post("/api/incidents/{incident_id}/claim")
+    def claim_incident(
+        incident_id: str,
+        claim: IncidentClaimRequest,
+        request: Request,
+    ):
+        """Atomically assign one open incident to one investigation worker."""
+        run_id = os.getenv("DEMO_RUN_ID", "local")
+        now = datetime.now(timezone.utc)
+        incident = database_call(
+            request,
+            "incident-claim",
+            lambda: request.app.state.evidence.incidents.find_one_and_update(
+                {"_id": incident_id, "demo_run_id": run_id, "state": "open"},
+                {
+                    "$set": {
+                        "state": "investigating",
+                        "claimed_by": claim.agent_id,
+                        "claimed_at": now,
+                        "updated_at": now,
+                    },
+                    "$inc": {"claim_count": 1},
+                },
+                projection={"_id": 0},
+                return_document=ReturnDocument.AFTER,
+            ),
+        )
+        if incident is not None:
+            return incident
+
+        existing = database_call(
+            request,
+            "incident-claim-conflict-check",
+            lambda: request.app.state.evidence.incidents.find_one(
+                {"_id": incident_id, "demo_run_id": run_id}, {"state": 1}
+            ),
+        )
+        if existing is None:
+            raise HTTPException(404, "Incident not found.")
+        raise HTTPException(409, "Incident is no longer open.")
 
     @app.get(
         "/api/incidents/{incident_id}/investigations",

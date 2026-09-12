@@ -118,6 +118,8 @@ class IncidentDetector:
             "dedup_key": dedup_key,
             "baseline": {
                 "id": baseline["_id"],
+                "deployment_id": baseline["deployment_id"],
+                "git_sha": baseline["git_sha"],
                 "p95_latency_ms": baseline["p95_latency_ms"],
                 "mean_db_queries": baseline["mean_db_queries"],
             },

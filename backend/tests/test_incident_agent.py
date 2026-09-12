@@ -7,7 +7,9 @@ from backend.incident_agent.worker import (
     AgentBridgeError,
     AgentResult,
     BlackboxApi,
+    IncidentClaimConflict,
     NemoClawRunner,
+    normalize_report,
     process_next_incident,
 )
 
@@ -41,13 +43,20 @@ def test_runner_parses_nemoclaw_json_and_adds_bridge_identity():
     completed = Mock(returncode=0, stdout=json.dumps(envelope), stderr="")
     runner = NemoClawRunner("blackbox-agent", gateway_port="8990")
     with patch("backend.incident_agent.worker.subprocess.run", return_value=completed) as run:
-        result = runner.investigate({"id": "incident-1", "rule": "database_query_regression"})
+        result = runner.investigate({
+            "id": "incident-1",
+            "rule": "database_query_regression",
+            "baseline": {"deployment_id": "dep-healthy"},
+        })
 
     assert result.report["agent_id"] == "nemoclaw:blackbox-agent:main"
     assert result.report["model_name"] == "local/qwen"
     assert result.report["recommendations"][0]["requires_operator_approval"] is True
     assert run.call_args.kwargs["env"]["NEMOCLAW_GATEWAY_PORT"] == "8990"
-    assert run.call_args.args[0][:3] == ["nemoclaw", "blackbox-agent", "agent"]
+    assert not any(key.startswith("MONGO_") for key in run.call_args.kwargs["env"])
+    assert run.call_args.args[0][:5] == [
+        "openshell", "sandbox", "exec", "--name", "blackbox-agent",
+    ]
 
 
 def test_runner_rejects_unapproved_mutating_recommendation():
@@ -57,13 +66,15 @@ def test_runner_rejects_unapproved_mutating_recommendation():
     completed = Mock(returncode=0, stdout=json.dumps(envelope), stderr="")
     with patch("backend.incident_agent.worker.subprocess.run", return_value=completed):
         with pytest.raises(AgentBridgeError, match="contract"):
-            NemoClawRunner("blackbox-agent").investigate({"id": "incident-1"})
+            NemoClawRunner("blackbox-agent").investigate({
+                "id": "incident-1", "baseline": {"deployment_id": "dep-healthy"},
+            })
 
 
 def test_worker_uses_incident_and_investigation_endpoints():
     api = Mock(spec=BlackboxApi)
     api.open_incidents.return_value = [{"id": "incident-1"}]
-    api.incident.return_value = {"id": "incident-1", "rule": "database_query_regression"}
+    api.claim.return_value = {"id": "incident-1", "rule": "database_query_regression"}
     runner = Mock(spec=NemoClawRunner)
     runner.sandbox = "blackbox-agent"
     runner.agent_id = "main"
@@ -74,10 +85,9 @@ def test_worker_uses_incident_and_investigation_endpoints():
 
     assert process_next_incident(api, runner) is True
     api.open_incidents.assert_called_once_with(limit=1)
-    api.incident.assert_called_once_with("incident-1")
-    assert api.submit.call_count == 2
-    assert api.submit.call_args_list[0].args[1]["status"] == "in_progress"
-    assert api.submit.call_args_list[1].args[1]["status"] == "completed"
+    api.claim.assert_called_once_with("incident-1", "nemoclaw:blackbox-agent:main")
+    api.submit.assert_called_once()
+    assert api.submit.call_args.args[1]["status"] == "completed"
 
 
 def test_worker_is_idle_without_open_incidents():
@@ -86,3 +96,33 @@ def test_worker_is_idle_without_open_incidents():
     runner = Mock(spec=NemoClawRunner)
     assert process_next_incident(api, runner) is False
     api.incident.assert_not_called()
+
+
+def test_worker_skips_incident_claimed_by_another_worker():
+    api = Mock(spec=BlackboxApi)
+    api.open_incidents.return_value = [{"id": "incident-1"}]
+    api.claim.side_effect = IncidentClaimConflict("already claimed")
+    runner = Mock(spec=NemoClawRunner)
+    runner.sandbox = "blackbox-agent"
+    runner.agent_id = "main"
+
+    assert process_next_incident(api, runner) is True
+    runner.investigate.assert_not_called()
+    api.submit.assert_not_called()
+
+
+def test_report_aliases_are_normalized_and_unsafe_rollback_is_removed():
+    report = completed_report()
+    report["evidence"] = [
+        {"kind": "observed", "reference": "window-1", "summary": "Seven queries."},
+        {"kind": "rule_trigger", "reference": "query-rule", "summary": "Threshold crossed."},
+    ]
+    report["recommendations"][0]["target"] = "dep-bad"
+
+    normalized = normalize_report(
+        report,
+        {"deployment_id": "dep-bad", "baseline": {"deployment_id": "dep-healthy"}},
+    )
+
+    assert [item["kind"] for item in normalized["evidence"]] == ["metric", "rule"]
+    assert normalized["recommendations"] == []

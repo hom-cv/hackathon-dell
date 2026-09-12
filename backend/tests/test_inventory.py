@@ -285,6 +285,22 @@ def test_agent_can_query_and_fetch_incidents(mongo, monkeypatch):
         assert detail.json()["evidence_trace_ids"] == ["trace-1"]
         assert client.get("/api/incidents/missing").status_code == 404
 
+        claim = client.post(
+            "/api/incidents/incident-open/claim",
+            json={"agent_id": "nemoclaw:blackbox-agent:main"},
+        )
+        assert claim.status_code == 200
+        assert claim.json()["state"] == "investigating"
+        assert claim.json()["claimed_by"] == "nemoclaw:blackbox-agent:main"
+        assert client.post(
+            "/api/incidents/incident-open/claim",
+            json={"agent_id": "another-worker"},
+        ).status_code == 409
+        assert client.post(
+            "/api/incidents/missing/claim",
+            json={"agent_id": "nemoclaw:blackbox-agent:main"},
+        ).status_code == 404
+
         report_payload = {
             "agent_id": "investigator-local",
             "model_name": "local-sre-model",

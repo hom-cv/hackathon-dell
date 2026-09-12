@@ -13,6 +13,7 @@ The starter FastAPI app connects to MongoDB and serves the basic frontend from t
 | POST | `/api/suppliers` | Creates a supplier from `{name}`; names are unique ignoring case. |
 | GET | `/api/incidents` | Lists incidents for the active run; supports `state` and `limit` filters. |
 | GET | `/api/incidents/{id}` | Returns one incident and its supporting evidence for agent handoff. |
+| POST | `/api/incidents/{id}/claim` | Atomically assigns an open incident to one agent worker. |
 | GET | `/api/incidents/{id}/investigations` | Lists structured agent reports for an incident. |
 | POST | `/api/incidents/{id}/investigations` | Appends an agent investigation report and updates incident state. |
 | GET | `/docs` | Interactive OpenAPI documentation. |
@@ -117,10 +118,12 @@ retain `requires_operator_approval: true`; this endpoint never executes remediat
 ## NemoClaw incident worker
 
 The host-side worker connects the existing `blackbox-agent` NemoClaw sandbox to those
-HTTP endpoints. It polls open incidents, fetches the full handoff, marks the incident
-as investigating, runs one bounded agent turn, validates the structured output, and
+HTTP endpoints. It polls open incidents, atomically claims the full handoff, runs one
+bounded agent turn, validates the structured output, and
 posts the completed or failed report back to the application. It never connects to
-MongoDB directly.
+MongoDB directly. Noninteractive turns use NemoClaw's underlying OpenShell sandbox
+boundary, avoiding the CLI's global host lock while using the same managed agent,
+model, filesystem policy, and network policy.
 
 ```sh
 export BLACKBOX_API_URL=http://127.0.0.1:8000
@@ -130,6 +133,12 @@ export NEMOCLAW_GATEWAY_PORT=8990
 bash scripts/install-nemoclaw-skill.sh
 .venv/bin/python -m backend.incident_agent.worker --check
 .venv/bin/python -m backend.incident_agent.worker
+```
+
+For the demo, the equivalent one-command launcher is:
+
+```sh
+bash scripts/run-incident-worker.sh
 ```
 
 Use `--once` to process at most one open incident. Run the worker on the host: the
