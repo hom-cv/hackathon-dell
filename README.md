@@ -4,7 +4,7 @@
 
 Blackbox is a hackathon project for an autonomous site reliability engineering (SRE) agent. It is designed to detect incidents, investigate telemetry and source changes, recommend controlled remediation, and verify recovery. AI inference and sensitive operational data stay on the Dell Pro Max GB10.
 
-**Status:** The repository currently contains backend and frontend scaffolding. The architecture below describes the planned MVP.
+**Status:** A MongoDB-backed inventory demo is implemented: a FastAPI backend, a basic browser frontend, and a Docker Compose deployment. Detection, investigation, and remediation below remain the planned MVP.
 
 ## Why Blackbox
 
@@ -67,7 +67,15 @@ The MVP focuses on one complete loop: **detect → investigate → diagnose → 
 
 ## Repository
 
-- [`backend/`](backend/) — backend scaffold.
-- [`frontend/`](frontend/) — frontend scaffold.
+- [`backend/`](backend/) — inventory API and database integration tests.
+- [`frontend/`](frontend/) — basic inventory browser UI.
+- [`docs/mongodb-setup.md`](docs/mongodb-setup.md) — local setup, frontend integration, and GB10 deployment.
 
-Setup and run instructions will be added as the implementation lands.
+With Docker Engine and Compose available, run from the repository root:
+
+```sh
+python3 scripts/configure.py
+docker compose up --build -d --wait
+```
+
+Open [the inventory demo](http://localhost:8000) or [API documentation](http://localhost:8000/docs). MongoDB data persists in a named volume. The browser talks to the API; database credentials stay on the server.
