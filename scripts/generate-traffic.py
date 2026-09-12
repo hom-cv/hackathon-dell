@@ -4,6 +4,7 @@
 import argparse
 import json
 import math
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from time import monotonic, sleep
 from urllib.error import HTTPError, URLError
@@ -41,8 +42,15 @@ def main() -> None:
     total_requests = max(1, math.ceil(args.duration * args.rate))
     interval = 1 / args.rate
     scheduled_at = monotonic()
+    next_progress_at = scheduled_at + 10
     futures = []
     missed_schedules = 0
+
+    print(
+        f"Generating {total_requests} requests over {args.duration:g}s against {args.url}...",
+        file=sys.stderr,
+        flush=True,
+    )
 
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         for index in range(total_requests):
@@ -53,6 +61,15 @@ def main() -> None:
             elif -delay > interval:
                 missed_schedules += 1
             futures.append(executor.submit(request_inventory, args.url, args.timeout))
+            now = monotonic()
+            if now >= next_progress_at:
+                elapsed = min(args.duration, now - scheduled_at)
+                print(
+                    f"  {elapsed:.0f}s / {args.duration:g}s — {index + 1} requests scheduled",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                next_progress_at += 10
 
     results = [future.result() for future in as_completed(futures)]
     latencies = [latency for _success, latency in results]

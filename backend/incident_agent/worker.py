@@ -307,6 +307,12 @@ def main() -> None:
         health = api.health()
         print(json.dumps({"api": "connected", "database": health.get("database"), "url": api.base_url}))
         return
+    logger.info(
+        "Incident worker started: polling %s every %.2f seconds with sandbox %s (Ctrl+C to stop)",
+        api.base_url,
+        max(0.25, args.poll_interval),
+        runner.sandbox,
+    )
     while True:
         processed = process_next_incident(api, runner)
         if args.once:

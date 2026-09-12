@@ -1,8 +1,9 @@
-# Blackbox demo runbook
+# Healbot demo runbook
 
 Run everything from the repository root. Use a **new run ID for every rehearsal**.
 This walkthrough uses the existing healthy and bad-join commits on `main`; it does
-not use the agent-integration branch.
+not use the agent-integration branch. Compose commands use `sg docker` because the
+GB10 login session may not have refreshed its Docker group membership yet.
 
 ## Before the audience arrives
 
@@ -13,13 +14,14 @@ python3 scripts/configure.py
 export DEMO_RUN_ID=join-demo-live-01
 
 git switch main
-DEMO_RUN_ID="$DEMO_RUN_ID" \
-DEPLOYMENT_ID=dep-healthy \
-GIT_SHA="$(git rev-parse HEAD)" \
-docker compose up --build -d --wait
+export DEPLOYMENT_ID=dep-healthy
+export GIT_SHA="$(git rev-parse HEAD)"
+sg docker -c 'docker compose up --build -d --wait'
 
 curl --fail http://localhost:8001/api/health
-python3 scripts/generate-traffic.py --rate 5 --duration 90 --concurrency 10
+python3 scripts/generate-traffic.py \
+  --url http://localhost:8001/api/items \
+  --rate 5 --duration 90 --concurrency 10
 ```
 
 Keep this terminal open so `DEMO_RUN_ID` remains set.
@@ -27,18 +29,16 @@ Keep this terminal open so `DEMO_RUN_ID` remains set.
 ### Terminal 2 — connect NemoClaw
 
 ```sh
-export BLACKBOX_API_URL=http://127.0.0.1:8001
-export NEMOCLAW_SANDBOX_NAME=blackbox-agent
-export NEMOCLAW_GATEWAY_PORT=8990
-
 nemoclaw blackbox-agent status
 bash scripts/install-nemoclaw-skill.sh
-.venv/bin/python -m backend.incident_agent.worker --check
+bash scripts/run-incident-worker.sh --check
 bash scripts/run-incident-worker.sh
 ```
 
 Leave the worker running. It will poll, claim the first incident, ask NemoClaw to
-investigate it, and submit the diagnosis automatically.
+investigate it, and submit the diagnosis automatically. The final command does not
+return to the prompt; after its startup message it stays quiet until an incident is
+found. Stop it later with `Ctrl+C`.
 
 Open the operator dashboard and leave it ready to refresh:
 
@@ -52,16 +52,17 @@ http://localhost:8001/admin
 
 ```sh
 git switch --detach e3f687c
-DEMO_RUN_ID="$DEMO_RUN_ID" \
-DEPLOYMENT_ID=dep-bad-join \
-GIT_SHA="$(git rev-parse HEAD)" \
-docker compose up --build -d --wait
+export DEPLOYMENT_ID=dep-bad-join
+export GIT_SHA="$(git rev-parse HEAD)"
+sg docker -c 'docker compose up --build -d --wait'
 ```
 
 ### 2. Generate degraded traffic
 
 ```sh
-python3 scripts/generate-traffic.py --rate 5 --duration 40 --concurrency 10
+python3 scripts/generate-traffic.py \
+  --url http://localhost:8001/api/items \
+  --rate 5 --duration 40 --concurrency 10
 ```
 
 ### 3. Show detection and diagnosis
@@ -88,10 +89,9 @@ Stop the worker with `Ctrl+C`, then run in Terminal 1:
 
 ```sh
 git switch main
-DEMO_RUN_ID="$DEMO_RUN_ID" \
-DEPLOYMENT_ID=dep-recovered \
-GIT_SHA="$(git rev-parse HEAD)" \
-docker compose up --build -d --wait
+export DEPLOYMENT_ID=dep-recovered
+export GIT_SHA="$(git rev-parse HEAD)"
+sg docker -c 'docker compose up --build -d --wait'
 ```
 
 Do not reuse `join-demo-live-01`; increment it before the next rehearsal.
