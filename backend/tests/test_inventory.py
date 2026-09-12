@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -7,6 +8,7 @@ from pymongo import MongoClient
 from pymongo.errors import ServerSelectionTimeoutError
 
 from backend.app import create_app
+from backend.detection import IncidentDetector
 
 
 @pytest.fixture
@@ -14,7 +16,7 @@ def mongo():
     uri = os.getenv("MONGODB_TEST_URI")
     if not uri:
         pytest.skip("Set MONGODB_TEST_URI to a real MongoDB with permission to create test databases.")
-    client = MongoClient(uri, serverSelectionTimeoutMS=2000)
+    client = MongoClient(uri, serverSelectionTimeoutMS=2000, tz_aware=True)
     client.admin.command("ping")
     database = f"blackbox_test_{uuid4().hex}"
     yield uri, database, client
@@ -178,3 +180,49 @@ def test_admin_overview_reads_persisted_telemetry(mongo):
         assert body["services"][0]["id"] == "inventory"
         assert body["activity"][0]["http_route"] == "/api/items"
         assert body["telemetry"] == {"dropped_record_count": 0, "write_failure_count": 0}
+
+
+def test_query_regression_creates_one_deduplicated_incident(mongo):
+    _uri, database_name, connection = mongo
+    database = connection[database_name]
+    database.baselines.create_index(
+        [("demo_run_id", 1), ("service", 1), ("route", 1)], unique=True,
+    )
+    database.incidents.create_index("dedup_key", unique=True)
+    detector = IncidentDetector(database, run_id="detection-test")
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    current_window = now - timedelta(seconds=int(now.timestamp()) % 10)
+    first_window = current_window - timedelta(seconds=80)
+    records = []
+    for window_index in range(8):
+        regressed = window_index >= 6
+        window_start = first_window + timedelta(seconds=window_index * 10)
+        for sample in range(30):
+            records.append({
+                "demo_run_id": "detection-test",
+                "service": "inventory",
+                "event": "request.completed",
+                "http_method": "GET",
+                "http_route": "/api/items",
+                "timestamp": window_start + timedelta(milliseconds=sample * 10),
+                "duration_ms": 30 if regressed else 10,
+                "db_query_count": 6 if regressed else 1,
+                "deployment_id": "dep-bad" if regressed else "dep-healthy",
+                "git_sha": "b" * 40 if regressed else "a" * 40,
+                "trace_id": f"trace-{window_index}-{sample}",
+                "status_code": 200,
+            })
+    database.logs.insert_many(records)
+
+    incident = detector.evaluate(now)
+    assert incident is not None
+    assert incident["rule"] == "database_query_regression"
+    assert incident["deployment_id"] == "dep-bad"
+    assert incident["baseline"]["mean_db_queries"] == 1
+    assert incident["observed_windows"][-1]["mean_db_queries"] == 6
+    assert database.incidents.count_documents({}) == 1
+
+    repeated = detector.evaluate(now)
+    assert repeated["id"] == incident["id"]
+    assert database.incidents.count_documents({}) == 1

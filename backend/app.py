@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from backend.detection import IncidentDetector
 from backend.telemetry import TelemetryWriter
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -165,12 +166,27 @@ def create_app(
             logs = evidence.logs
             logs.create_index([("demo_run_id", 1), ("service", 1), ("timestamp", -1)])
             logs.create_index("trace_id")
+            evidence.baselines.create_index(
+                [("demo_run_id", 1), ("service", 1), ("route", 1)], unique=True,
+            )
+            evidence.incidents.create_index("dedup_key", unique=True)
+            evidence.incidents.create_index(
+                [("demo_run_id", 1), ("state", 1), ("created_at", -1)]
+            )
             queue_size = max(1, int(os.getenv("TELEMETRY_QUEUE_SIZE", "10000")))
             app.state.telemetry = TelemetryWriter(logs, queue_size=queue_size)
             app.state.evidence = evidence
             app.state.telemetry.start()
+            app.state.detector = IncidentDetector(
+                evidence,
+                run_id=os.getenv("DEMO_RUN_ID", "local"),
+                interval_seconds=max(0.25, float(os.getenv("DETECTION_INTERVAL_SECONDS", "2"))),
+            )
+            app.state.detector.start()
             yield
         finally:
+            if detector := getattr(app.state, "detector", None):
+                detector.close()
             if telemetry := getattr(app.state, "telemetry", None):
                 telemetry.close()
             client.close()
@@ -339,7 +355,9 @@ def create_app(
         run_id = os.getenv("DEMO_RUN_ID", "local")
         workload_filter = {
             "demo_run_id": run_id,
-            "http_route": {"$nin": ["/api/health", "/api/admin/overview", "/healthz"]},
+            "event": "request.completed",
+            "http_method": "GET",
+            "http_route": "/api/items",
         }
         recent_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=1)}}
         service_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=5)}}
@@ -383,6 +401,15 @@ def create_app(
                 {"demo_run_id": run_id, "state": {"$ne": "resolved"}}
             ),
         )
+        incidents = database_call(
+            request,
+            "active-incident-list",
+            lambda: list(
+                request.app.state.evidence.incidents.find(
+                    {"demo_run_id": run_id, "state": {"$ne": "resolved"}}, {"_id": 0}
+                ).sort("created_at", -1).limit(10)
+            ),
+        )
 
         services = []
         for row in service_rows:
@@ -411,12 +438,27 @@ def create_app(
                 "requests_per_minute": len(minute_logs),
             },
             "services": services,
+            "incidents": incidents,
             "activity": activity,
             "telemetry": {
                 "dropped_record_count": request.app.state.telemetry.dropped_record_count,
                 "write_failure_count": request.app.state.telemetry.write_failure_count,
             },
         }
+
+    @app.get("/api/incidents/{incident_id}")
+    def incident_detail(incident_id: str, request: Request):
+        incident = database_call(
+            request,
+            "incident-by-id",
+            lambda: request.app.state.evidence.incidents.find_one(
+                {"_id": incident_id, "demo_run_id": os.getenv("DEMO_RUN_ID", "local")},
+                {"_id": 0},
+            ),
+        )
+        if incident is None:
+            raise HTTPException(404, "Incident not found.")
+        return incident
 
     @app.get("/", include_in_schema=False)
     def frontend():

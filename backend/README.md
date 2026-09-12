@@ -11,6 +11,7 @@ The starter FastAPI app connects to MongoDB and serves the basic frontend from t
 | DELETE | `/api/items/{sku}` | Deletes an item; missing SKU returns 404. Suppliers are retained. |
 | GET | `/api/suppliers` | Lists suppliers alphabetically. |
 | POST | `/api/suppliers` | Creates a supplier from `{name}`; names are unique ignoring case. |
+| GET | `/api/incidents/{id}` | Returns one incident and its supporting evidence for agent handoff. |
 | GET | `/docs` | Interactive OpenAPI documentation. |
 
 SKU is normalized to uppercase. Stock must be an integer from 0 to 1,000,000. New items may include a valid `supplier_id`. The item dialog lets operators select an existing supplier or type a new supplier name, which creates the supplier before the item. Responses include `created_at` and `updated_at` UTC timestamps and do not expose MongoDB `_id` values.
@@ -41,12 +42,25 @@ but excluded from workload latency and request-rate calculations.
 Generate controlled traffic against the healthy supplier join with:
 
 ```sh
-python3 scripts/generate-traffic.py --rate 5 --duration 60 --concurrency 10
+python3 scripts/generate-traffic.py --rate 5 --duration 90 --concurrency 10
 ```
 
 The generator schedules requests at a fixed rate, uses trace IDs, permits concurrent
 in-flight work, surfaces missed schedules and failures, and reports mean and p95
 client latency. It does not create incidents or mutate application data.
+
+## Incident detection
+
+The background detector builds non-overlapping 10-second windows for successful and
+failed `GET /api/items` requests. A window needs at least 30 requests. The first six
+consecutive complete windows for a run become its persisted healthy baseline.
+
+An incident is created after two consecutive complete windows exceed either the p95
+latency threshold (`max(3 × baseline, 100 ms)`) or the mean database-query threshold
+(`max(3 × baseline, baseline + 2)`). Incidents are deduplicated by run, service,
+deployment, and rule. Set a fresh `DEMO_RUN_ID`, plus `DEPLOYMENT_ID` and the full
+`GIT_SHA`, for each reproducible demo so the eventual investigation can correlate the
+incident with its deployment and source diff.
 
 Tests use a real MongoDB and create/drop only randomly named `blackbox_test_*` databases:
 

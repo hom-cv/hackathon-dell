@@ -103,6 +103,13 @@ h1 { margin: 0; font-size: 29px; line-height: 1.15; font-weight: 680; letter-spa
 .activity-status.error { color: #b35f52; }
 .activity-duration, .activity-time { color: #929b96; }
 .load-error { color: #a65045 !important; }
+.incident-feed { padding: 7px 21px 16px; }
+.incident-row { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #f0f2f1; color: inherit; text-decoration: none; }
+.incident-row:last-child { border-bottom: 0; }
+.incident-row strong, .incident-row small { display: block; }
+.incident-row strong { margin-bottom: 6px; color: #4b5651; font-size: 11px; }
+.incident-row small { color: #919995; font-size: 9px; }
+.incident-severity { padding: 4px 7px; border-radius: 10px; background: #f8ece9; color: #a65b50; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 
 :focus-visible { outline: 3px solid #79b5de; outline-offset: 3px; }
 

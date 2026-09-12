@@ -36,6 +36,34 @@ function renderServices(services) {
   $("#service-list-caption").textContent = "Five-minute service window from blackbox.logs.";
 }
 
+function renderIncidents(incidents) {
+  const list = $("#incident-list");
+  if (!incidents.length) {
+    list.className = "empty-state";
+    list.replaceChildren(emptyState("No active incidents", "Detections requiring attention will appear here."));
+    return;
+  }
+  list.className = "incident-feed";
+  const cards = incidents.map((incident) => {
+    const card = document.createElement("a");
+    card.className = "incident-row";
+    card.href = `/api/incidents/${encodeURIComponent(incident.id)}`;
+    card.target = "_blank";
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    title.textContent = incident.summary;
+    const detail = document.createElement("small");
+    detail.textContent = `${incident.id} · ${incident.rule.replaceAll("_", " ")}`;
+    copy.append(title, detail);
+    const severity = document.createElement("span");
+    severity.className = "incident-severity";
+    severity.textContent = incident.severity;
+    card.append(copy, severity);
+    return card;
+  });
+  list.replaceChildren(...cards);
+}
+
 function renderActivity(activity) {
   const list = $("#activity-list");
   if (!activity.length) {
@@ -83,6 +111,7 @@ async function refreshDashboard() {
     $("#system-status").textContent = telemetryHealthy ? "Telemetry connected" : "Telemetry data incomplete";
     $(".system-dot").style.background = telemetryHealthy ? "#34785f" : "#b35f52";
     renderServices(data.services);
+    renderIncidents(data.incidents);
     renderActivity(data.activity);
   } catch (error) {
     $("#system-status").textContent = "Telemetry unavailable";
