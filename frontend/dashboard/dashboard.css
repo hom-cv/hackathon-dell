@@ -459,3 +459,107 @@ dialog::backdrop { background: #090e17cc; backdrop-filter: blur(5px); }
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Comfortable desktop density for an operational console. */
+@media (min-width: 761px) {
+  :root { font-size: 15px; }
+  .sidebar { width: 258px; padding: 34px 20px 0; }
+  .main-shell { margin-left: 258px; }
+  .brand { font-size: 30px; }
+  .brand-mark img { width: 30px; height: 30px; }
+  .workspace { padding: 13px 11px; margin: 35px 0 33px; }
+  .workspace-avatar { width: 34px; height: 34px; font-size: 13px; }
+  .workspace strong, .runtime-card strong, .operator strong { font-size: 12px; }
+  .workspace small, .runtime-card p, .operator small { font-size: 10px; }
+  .nav-label { font-size: 9px; }
+  nav > a, .sidebar-link { font-size: 13px; padding: 13px 14px; }
+  nav img, .sidebar-link img { width: 19px; height: 19px; }
+  .runtime-card { padding: 16px 14px; }
+  .topbar { height: 76px; padding: 0 42px; }
+  .breadcrumbs { font-size: 12px; }
+  .icon-button { width: 36px; height: 36px; }
+  .icon-button img { width: 19px; height: 19px; }
+  main { max-width: 1710px; padding: 42px 44px 0; }
+  .page-heading { margin-bottom: 31px; }
+  .eyebrow { font-size: 9px; margin-bottom: 10px; }
+  h1 { font-size: 34px; }
+  .page-heading h1 + p { font-size: 14px; }
+  .feed-label { font-size: 12px; }
+  .button { min-height: 40px; padding: 10px 15px; font-size: 12px; }
+  .button img { width: 16px; height: 16px; }
+  .mode-bar { padding: 13px 16px; margin-bottom: 28px; }
+  .mode-bar > div:first-child { font-size: 12px; }
+  .mode-label { font-size: 9px; padding: 4px 7px; }
+  .mode-controls label, .mode-controls select { font-size: 11px; }
+  .stats-grid { gap: 20px; margin-bottom: 28px; }
+  .stat { padding: 22px 23px; border-radius: 10px; }
+  .stat > div { font-size: 13px; }
+  .stat > strong { font-size: 38px; margin: 16px 0 14px; }
+  .stat-detail { font-size: 11px; }
+  .panel { border-radius: 10px; }
+  .panel-heading { min-height: 62px; padding: 18px 22px; }
+  .panel-heading h2 { font-size: 15px; }
+  .badge { font-size: 10px; padding: 5px 8px; }
+  .chart-body { padding: 22px 23px 18px; }
+  .chart-summary > strong { font-size: 31px; }
+  .chart-summary > span, .chart-legend { font-size: 11px; }
+  #latency-chart { height: 250px; }
+  .investigation-grid { gap: 26px; grid-template-columns: minmax(0, 1.6fr) minmax(340px, 1fr); }
+  .right-column { gap: 22px; }
+  .incident-intro { padding: 26px 24px 20px; }
+  .incident-intro h3 { font-size: 20px; }
+  .incident-intro > p, .event-body > p, .recommendation-body > p, .verification-body > p { font-size: 13px; }
+  .incident-meta { font-size: 11px; gap: 18px; }
+  .lifecycle { margin: 0 24px; padding: 20px 0 24px; }
+  .lifecycle > div { font-size: 10px; }
+  .lifecycle > div > span { width: 23px; height: 23px; font-size: 10px; }
+  .lifecycle > div:not(:last-child):after { top: 11px; left: calc(50% + 11px); right: calc(-50% + 11px); }
+  .section-label { padding: 24px 24px 0; font-size: 9px; }
+  .events { padding: 26px 24px; }
+  .event { gap: 15px; padding-bottom: 31px; }
+  .event-icon { width: 34px; height: 34px; }
+  .event-icon .icon { width: 17px; height: 17px; }
+  .event:not(:last-child):before { left: 16px; top: 36px; }
+  .event-title h4 { font-size: 13px; }
+  .event-title time, .tool-tag, .event-meta .text-link { font-size: 10px; }
+  .recommendation-body { padding: 24px; }
+  .recommendation-body h3 { font-size: 22px; }
+  .release-path { padding: 18px 16px; }
+  .release-path code { font-size: 12px; }
+  .policy-note strong { font-size: 11px; }
+  .policy-note span { font-size: 10px; }
+  .recommendation .button { font-size: 12px; min-height: 43px; }
+  .result-note { font-size: 12px; padding: 14px; }
+  .evidence-list { padding: 4px 20px; }
+  .evidence-list > button { padding: 16px 0; }
+  .evidence-icon { width: 35px; height: 35px; }
+  .evidence-list strong { font-size: 12px; }
+  .evidence-list small { font-size: 8px; }
+  .verification-body { padding: 22px 24px; }
+  .before-after strong { font-size: 28px; }
+  th { font-size: 10px; padding: 15px 22px; }
+  td { font-size: 12px; padding: 18px 22px; }
+  .service-name { font-size: 12px; }
+  .service-icon { width: 32px; height: 32px; }
+  .deployment { font-size: 10px; }
+  .health-grid > div { padding: 26px 22px; }
+  .health-grid strong { font-size: 13px; }
+  .health-grid small { font-size: 10px; }
+  .empty { padding: 62px 28px; }
+  .empty h3 { font-size: 18px; }
+  .empty p { font-size: 13px; }
+  .alert { padding: 17px 19px; }
+  .alert strong { font-size: 14px; }
+  .alert p { font-size: 12px; }
+  .search { padding: 12px 14px; }
+  .search input { font-size: 13px; }
+  .incident-row { padding: 24px 26px; }
+  .incident-row strong { font-size: 16px; }
+  .incident-row small { font-size: 11px; }
+  .severity-icon { width: 44px; height: 44px; }
+  .service-detail-grid { padding: 30px; }
+  .service-detail-grid strong { font-size: 21px; }
+  .settings-body { padding: 28px; }
+  .settings-body > p, dl > div, .dependency { font-size: 13px; }
+  footer { padding: 29px 0; font-size: 10px; }
+}
