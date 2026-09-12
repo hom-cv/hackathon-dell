@@ -8,7 +8,7 @@ from urllib.parse import quote_plus
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +21,14 @@ from backend.telemetry import TelemetryWriter
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 logger = logging.getLogger(__name__)
+
+
+def database_call(request: Request, fingerprint: str, operation):
+    """Execute one application database operation and record its safe fingerprint."""
+    request.state.db_query_count += 1
+    summary = request.state.db_query_summary
+    summary[fingerprint] = summary.get(fingerprint, 0) + 1
+    return operation()
 
 
 def mongo_uri() -> str:
@@ -40,6 +48,7 @@ class NewItem(BaseModel):
     sku: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=100)
     stock: int = Field(ge=0, le=1_000_000, strict=True)
+    supplier_id: str | None = Field(default=None, min_length=1, max_length=100)
 
     @field_validator("sku")
     @classmethod
@@ -52,17 +61,60 @@ class StockUpdate(BaseModel):
     stock: int = Field(ge=0, le=1_000_000, strict=True)
 
 
-class Item(NewItem):
+class Supplier(BaseModel):
+    id: str
+    name: str
+
+
+class NewSupplier(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class Item(BaseModel):
+    sku: str
+    name: str
+    stock: int
     created_at: datetime
     updated_at: datetime
+    supplier: Supplier | None = None
 
 
 SEED_ITEMS = [
-    {"sku": "KEY-001", "name": "Mechanical keyboard", "stock": 24},
-    {"sku": "MOU-002", "name": "Wireless mouse", "stock": 8},
-    {"sku": "HUB-003", "name": "USB-C hub", "stock": 0},
-    {"sku": "CAB-004", "name": "USB-C cable", "stock": 52},
-    {"sku": "AUD-005", "name": "Studio headphones", "stock": 16},
+    {"sku": "KEY-001", "name": "Mechanical keyboard", "stock": 24, "supplier_id": "peripheral-works"},
+    {"sku": "MOU-002", "name": "Wireless mouse", "stock": 8, "supplier_id": "peripheral-works"},
+    {"sku": "HUB-003", "name": "USB-C hub", "stock": 0, "supplier_id": "connectivity-labs"},
+    {"sku": "CAB-004", "name": "USB-C cable", "stock": 52, "supplier_id": "connectivity-labs"},
+    {"sku": "AUD-005", "name": "Studio headphones", "stock": 16, "supplier_id": "audio-forge"},
+]
+
+SEED_SUPPLIERS = [
+    {"_id": "peripheral-works", "name": "Peripheral Works"},
+    {"_id": "connectivity-labs", "name": "Connectivity Labs"},
+    {"_id": "audio-forge", "name": "Audio Forge"},
+]
+
+ITEMS_WITH_SUPPLIERS_PIPELINE = [
+    {"$lookup": {
+        "from": "suppliers",
+        "localField": "supplier_id",
+        "foreignField": "_id",
+        "as": "supplier_matches",
+    }},
+    {"$set": {
+        "supplier": {
+            "$cond": [
+                {"$gt": [{"$size": "$supplier_matches"}, 0]},
+                {"$let": {
+                    "vars": {"match": {"$arrayElemAt": ["$supplier_matches", 0]}},
+                    "in": {"id": "$$match._id", "name": "$$match.name"},
+                }},
+                None,
+            ]
+        }
+    }},
+    {"$project": {"_id": 0, "supplier_id": 0, "supplier_matches": 0}},
+    {"$sort": {"sku": 1}},
 ]
 
 
@@ -79,17 +131,36 @@ def create_app(
         )
         try:
             client.admin.command("ping")
-            collection = client[database or os.getenv("MONGO_DATABASE", "shop")].inventory
+            application_database = client[database or os.getenv("MONGO_DATABASE", "shop")]
+            collection = application_database.inventory
+            suppliers = application_database.suppliers
             collection.create_index("sku", unique=True)
             now = datetime.now(timezone.utc)
+            for supplier in SEED_SUPPLIERS:
+                suppliers.update_one(
+                    {"_id": supplier["_id"]}, {"$setOnInsert": supplier}, upsert=True,
+                )
+                suppliers.update_one(
+                    {"_id": supplier["_id"], "normalized_name": {"$exists": False}},
+                    {"$set": {"normalized_name": supplier["name"].casefold()}},
+                )
+            suppliers.create_index("normalized_name", unique=True)
+            if collection.find_one({}, {"_id": 1}) is None:
+                for item in SEED_ITEMS:
+                    collection.update_one(
+                        {"sku": item["sku"]},
+                        {"$setOnInsert": {**item, "created_at": now, "updated_at": now}},
+                        upsert=True,
+                    )
             for item in SEED_ITEMS:
+                # Schema backfill only: never replace edited names, stock, or timestamps.
                 collection.update_one(
-                    {"sku": item["sku"]},
-                    {"$setOnInsert": {**item, "created_at": now, "updated_at": now}},
-                    upsert=True,
+                    {"sku": item["sku"], "supplier_id": {"$exists": False}},
+                    {"$set": {"supplier_id": item["supplier_id"]}},
                 )
             app.state.mongo = client
             app.state.inventory = collection
+            app.state.suppliers = suppliers
             evidence = client[telemetry_database or os.getenv("TELEMETRY_DATABASE", "blackbox")]
             logs = evidence.logs
             logs.create_index([("demo_run_id", 1), ("service", 1), ("timestamp", -1)])
@@ -109,7 +180,7 @@ def create_app(
     if origins:
         app.add_middleware(
             CORSMiddleware, allow_origins=origins,
-            allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"],
+            allow_methods=["GET", "POST", "PATCH", "DELETE"], allow_headers=["Content-Type"],
         )
 
     @app.middleware("http")
@@ -119,6 +190,7 @@ def create_app(
 
         trace_id = request.headers.get("x-trace-id") or uuid4().hex
         request.state.db_query_count = 0
+        request.state.db_query_summary = {}
         started_at = datetime.now(timezone.utc)
         started = perf_counter()
         status_code = 500
@@ -152,6 +224,7 @@ def create_app(
                     "duration_ms": round(duration_ms, 3),
                     "status_code": status_code,
                     "db_query_count": request.state.db_query_count,
+                    "db_query_summary": request.state.db_query_summary,
                     "error_type": error_type,
                     "http_method": request.method,
                     "http_route": request.url.path,
@@ -166,37 +239,98 @@ def create_app(
     @app.get("/healthz", include_in_schema=False)
     @app.get("/api/health")
     def health(request: Request):
-        request.state.db_query_count += 1
-        request.app.state.inventory.find_one({}, {"_id": 1})
+        database_call(
+            request,
+            "inventory-health",
+            lambda: request.app.state.inventory.find_one({}, {"_id": 1}),
+        )
         return {"status": "ok", "database": "connected"}
 
     @app.get("/api/items", response_model=list[Item])
     def list_items(request: Request):
-        request.state.db_query_count += 1
-        return list(request.app.state.inventory.find({}, {"_id": 0}).sort("sku", 1))
+        return database_call(
+            request,
+            "inventory-with-supplier",
+            lambda: list(request.app.state.inventory.aggregate(ITEMS_WITH_SUPPLIERS_PIPELINE)),
+        )
+
+    @app.get("/api/suppliers", response_model=list[Supplier])
+    def list_suppliers(request: Request):
+        documents = database_call(
+            request,
+            "supplier-list",
+            lambda: list(request.app.state.suppliers.find({}, {"normalized_name": 0}).sort("name", 1)),
+        )
+        return [{"id": document["_id"], "name": document["name"]} for document in documents]
+
+    @app.post("/api/suppliers", response_model=Supplier, status_code=201)
+    def create_supplier(supplier: NewSupplier, request: Request):
+        document = {
+            "_id": f"supplier-{uuid4().hex[:12]}",
+            "name": supplier.name,
+            "normalized_name": supplier.name.casefold(),
+        }
+        try:
+            database_call(
+                request,
+                "supplier-insert",
+                lambda: request.app.state.suppliers.insert_one(document.copy()),
+            )
+        except DuplicateKeyError:
+            raise HTTPException(409, "A supplier with that name already exists.") from None
+        return {"id": document["_id"], "name": document["name"]}
 
     @app.post("/api/items", response_model=Item, status_code=201)
     def create_item(item: NewItem, request: Request):
         now = datetime.now(timezone.utc)
         document = {**item.model_dump(), "created_at": now, "updated_at": now}
+        supplier = None
+        if item.supplier_id:
+            supplier_document = database_call(
+                request,
+                "supplier-by-id",
+                lambda: request.app.state.suppliers.find_one(
+                    {"_id": item.supplier_id}, {"normalized_name": 0}
+                ),
+            )
+            if supplier_document is None:
+                raise HTTPException(422, "Supplier does not exist.")
+            supplier = {"id": supplier_document["_id"], "name": supplier_document["name"]}
         try:
-            request.state.db_query_count += 1
-            request.app.state.inventory.insert_one(document.copy())
+            database_call(
+                request,
+                "inventory-insert",
+                lambda: request.app.state.inventory.insert_one(document.copy()),
+            )
         except DuplicateKeyError:
             raise HTTPException(409, "An item with that SKU already exists.") from None
-        return document
+        return {**document, "supplier": supplier}
 
     @app.patch("/api/items/{sku}", response_model=Item)
     def update_stock(sku: str, update: StockUpdate, request: Request):
-        request.state.db_query_count += 1
-        document = request.app.state.inventory.find_one_and_update(
-            {"sku": sku.upper()},
-            {"$set": {"stock": update.stock, "updated_at": datetime.now(timezone.utc)}},
-            projection={"_id": 0}, return_document=ReturnDocument.AFTER,
+        document = database_call(
+            request,
+            "inventory-stock-update",
+            lambda: request.app.state.inventory.find_one_and_update(
+                {"sku": sku.upper()},
+                {"$set": {"stock": update.stock, "updated_at": datetime.now(timezone.utc)}},
+                projection={"_id": 0}, return_document=ReturnDocument.AFTER,
+            ),
         )
         if document is None:
             raise HTTPException(404, "Item not found.")
         return document
+
+    @app.delete("/api/items/{sku}", status_code=204)
+    def delete_item(sku: str, request: Request):
+        result = database_call(
+            request,
+            "inventory-delete",
+            lambda: request.app.state.inventory.delete_one({"sku": sku.upper()}),
+        )
+        if result.deleted_count == 0:
+            raise HTTPException(404, "Item not found.")
+        return Response(status_code=204)
 
     @app.get("/api/admin/overview")
     def admin_overview(request: Request):
@@ -210,32 +344,44 @@ def create_app(
         recent_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=1)}}
         service_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=5)}}
 
-        request.state.db_query_count += 1
-        minute_logs = list(request.app.state.evidence.logs.find(recent_filter, {"_id": 0}))
-
-        request.state.db_query_count += 1
-        service_rows = list(request.app.state.evidence.logs.aggregate([
-            {"$match": service_filter},
-            {"$group": {
-                "_id": "$service",
-                "request_count": {"$sum": 1},
-                "error_count": {"$sum": {"$cond": [{"$gte": ["$status_code", 500]}, 1, 0]}},
-                "average_latency_ms": {"$avg": "$duration_ms"},
-                "last_seen_at": {"$max": "$timestamp"},
-            }},
-            {"$sort": {"_id": 1}},
-        ]))
-
-        request.state.db_query_count += 1
-        activity = list(
-            request.app.state.evidence.logs.find(workload_filter, {"_id": 0})
-            .sort("timestamp", -1)
-            .limit(20)
+        minute_logs = database_call(
+            request,
+            "telemetry-recent-window",
+            lambda: list(request.app.state.evidence.logs.find(recent_filter, {"_id": 0})),
         )
 
-        request.state.db_query_count += 1
-        active_incidents = request.app.state.evidence.incidents.count_documents(
-            {"demo_run_id": run_id, "state": {"$ne": "resolved"}}
+        service_rows = database_call(
+            request,
+            "telemetry-service-window",
+            lambda: list(request.app.state.evidence.logs.aggregate([
+                {"$match": service_filter},
+                {"$group": {
+                    "_id": "$service",
+                    "request_count": {"$sum": 1},
+                    "error_count": {"$sum": {"$cond": [{"$gte": ["$status_code", 500]}, 1, 0]}},
+                    "average_latency_ms": {"$avg": "$duration_ms"},
+                    "last_seen_at": {"$max": "$timestamp"},
+                }},
+                {"$sort": {"_id": 1}},
+            ])),
+        )
+
+        activity = database_call(
+            request,
+            "telemetry-recent-activity",
+            lambda: list(
+                request.app.state.evidence.logs.find(workload_filter, {"_id": 0})
+                .sort("timestamp", -1)
+                .limit(20)
+            ),
+        )
+
+        active_incidents = database_call(
+            request,
+            "active-incident-count",
+            lambda: request.app.state.evidence.incidents.count_documents(
+                {"demo_run_id": run_id, "state": {"$ne": "resolved"}}
+            ),
         )
 
         services = []

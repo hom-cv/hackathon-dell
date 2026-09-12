@@ -1,5 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 let items = [];
+let suppliers = [];
 let editingSku = null;
 let saving = false;
 const dialog = $("#item-dialog");
@@ -11,7 +12,7 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(10000),
   });
-  const body = await response.json();
+  const body = response.status === 204 ? null : await response.json();
   if (!response.ok) {
     const detail = Array.isArray(body.detail) ? body.detail.map((error) => error.msg).join(" ") : body.detail;
     throw new Error(detail || "The request failed.");
@@ -24,11 +25,20 @@ function notice(message = "", isError = false) {
   $("#notice").classList.toggle("error", isError);
 }
 
+function renderSupplierOptions() {
+  const options = suppliers.map((supplier) => {
+    const option = document.createElement("option");
+    option.value = supplier.name;
+    return option;
+  });
+  $("#supplier-options").replaceChildren(...options);
+}
+
 function render() {
   const query = $("#search").value.trim().toLowerCase();
   const filter = $("#stock-filter").value;
   const visible = items.filter((item) => {
-    const matches = `${item.name} ${item.sku}`.toLowerCase().includes(query);
+    const matches = `${item.name} ${item.sku} ${item.supplier?.name || ""}`.toLowerCase().includes(query);
     return matches && (filter === "all" || (filter === "out" && item.stock === 0)
       || (filter === "low" && item.stock > 0 && item.stock < 10)
       || (filter === "available" && item.stock > 0));
@@ -41,6 +51,7 @@ function render() {
     const row = $("#item-row").content.cloneNode(true);
     row.querySelector(".name").textContent = item.name;
     row.querySelector(".sku").textContent = item.sku;
+    row.querySelector(".supplier").textContent = item.supplier?.name || "Unassigned";
     row.querySelector(".stock").textContent = item.stock.toLocaleString();
     const status = row.querySelector(".stock-status");
     status.textContent = item.stock === 0 ? "Out of stock" : item.stock < 10 ? "Low stock" : "In stock";
@@ -50,13 +61,17 @@ function render() {
     button.title = `Edit stock for ${item.name}`;
     button.setAttribute("aria-label", button.title);
     button.addEventListener("click", () => openDialog(item));
+    const deleteButton = row.querySelector(".delete-item");
+    deleteButton.title = `Delete ${item.name}`;
+    deleteButton.setAttribute("aria-label", deleteButton.title);
+    deleteButton.addEventListener("click", () => deleteItem(item, deleteButton));
     return row;
   });
   $("#inventory").replaceChildren(...rows);
   if (!rows.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 5;
+    cell.colSpan = 6;
     cell.className = "empty";
     cell.textContent = items.length ? "No matching items." : "No inventory items.";
     row.append(cell);
@@ -64,11 +79,29 @@ function render() {
   }
 }
 
+async function deleteItem(item, button) {
+  if (!window.confirm(`Delete ${item.name} (${item.sku})? This cannot be undone.`)) return;
+  button.disabled = true;
+  try {
+    await api(`/items/${encodeURIComponent(item.sku)}`, { method: "DELETE" });
+    items = items.filter((candidate) => candidate.sku !== item.sku);
+    render();
+    notice(`${item.name} deleted.`);
+  } catch (error) {
+    button.disabled = false;
+    notice(error.message || "Unable to delete item.", true);
+  }
+}
+
 async function refresh() {
   $("#refresh").disabled = true;
   try {
-    const [nextItems] = await Promise.all([api("/items"), api("/health")]);
+    const [nextItems, nextSuppliers] = await Promise.all([
+      api("/items"), api("/suppliers"), api("/health"),
+    ]);
     items = nextItems;
+    suppliers = nextSuppliers;
+    renderSupplierOptions();
     render();
     $("#connection").className = "connection online";
     $("#connection-label").textContent = "Connected";
@@ -97,8 +130,10 @@ function openDialog(item = null) {
   $("#item-name").value = item?.name || "";
   $("#item-sku").value = item?.sku || "";
   $("#item-stock").value = item?.stock ?? 0;
+  $("#item-supplier").value = item?.supplier?.name || "";
   $("#item-name").disabled = Boolean(item);
   $("#item-sku").disabled = Boolean(item);
+  $("#item-supplier").disabled = Boolean(item);
   $("#form-error").textContent = "";
   dialog.showModal();
   $(item ? "#item-stock" : "#item-name").focus();
@@ -112,7 +147,24 @@ $("#item-form").addEventListener("submit", async (event) => {
   $("#form-error").textContent = "";
   try {
     const body = { stock: Number($("#item-stock").value) };
-    if (!editingSku) Object.assign(body, { name: $("#item-name").value, sku: $("#item-sku").value });
+    if (!editingSku) {
+      const supplierName = $("#item-supplier").value.trim();
+      let supplier = suppliers.find(
+        (candidate) => candidate.name.toLocaleLowerCase() === supplierName.toLocaleLowerCase(),
+      );
+      if (!supplier) {
+        supplier = await api("/suppliers", {
+          method: "POST", body: JSON.stringify({ name: supplierName }),
+        });
+        suppliers.push(supplier);
+        renderSupplierOptions();
+      }
+      Object.assign(body, {
+        name: $("#item-name").value,
+        sku: $("#item-sku").value,
+        supplier_id: supplier.id,
+      });
+    }
     await api(editingSku ? `/items/${encodeURIComponent(editingSku)}` : "/items", {
       method: editingSku ? "PATCH" : "POST", body: JSON.stringify(body),
     });

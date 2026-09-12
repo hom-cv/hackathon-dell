@@ -1,16 +1,19 @@
 # Backend
 
-The starter FastAPI app connects to MongoDB and serves the basic frontend from the same origin. It seeds five inventory items using insert-only upserts, so restarting never resets edited stock. The database is `shop`, collection `inventory`, with a unique SKU index. The application database user also has access to `blackbox` for future incident evidence.
+The starter FastAPI app connects to MongoDB and serves the basic frontend from the same origin. It seeds five inventory items and three suppliers using insert-only upserts, so restarting never resets edited stock. Application data uses `shop.inventory` and `shop.suppliers`. Inventory has a unique SKU index, and supplier joins use the indexed supplier `_id`. The application database user also has access to `blackbox` for incident evidence.
 
 | Method | Endpoint | Behavior |
 | --- | --- | --- |
 | GET | `/api/health` | Checks an authenticated database read; returns 503 on database failure. |
-| GET | `/api/items` | Lists items sorted by SKU. |
+| GET | `/api/items` | Lists items and supplier details using one indexed `$lookup`, sorted by SKU. |
 | POST | `/api/items` | Creates `{sku, name, stock}`; duplicate SKU returns 409. |
 | PATCH | `/api/items/{sku}` | Updates `{stock}`; missing SKU returns 404. |
+| DELETE | `/api/items/{sku}` | Deletes an item; missing SKU returns 404. Suppliers are retained. |
+| GET | `/api/suppliers` | Lists suppliers alphabetically. |
+| POST | `/api/suppliers` | Creates a supplier from `{name}`; names are unique ignoring case. |
 | GET | `/docs` | Interactive OpenAPI documentation. |
 
-SKU is normalized to uppercase. Stock must be an integer from 0 to 1,000,000. Responses include `created_at` and `updated_at` UTC timestamps and do not expose MongoDB `_id` values.
+SKU is normalized to uppercase. Stock must be an integer from 0 to 1,000,000. New items may include a valid `supplier_id`. The item dialog lets operators select an existing supplier or type a new supplier name, which creates the supplier before the item. Responses include `created_at` and `updated_at` UTC timestamps and do not expose MongoDB `_id` values.
 
 From the repository root, with a running MongoDB and configured `.env`:
 
@@ -24,8 +27,8 @@ python3 -m venv .venv
 
 Each request to `/api/*` or `/healthz` writes one structured completion record to
 `blackbox.logs`. The record includes a trace ID (accepting an incoming `X-Trace-ID`),
-latency, status, route, deployment metadata, and database-query count, but no request
-or response body. Writes are buffered outside the timed request path. Configure the
+latency, status, route, deployment metadata, database-query count, and safe query
+fingerprint counts, but no request or response body. Writes are buffered outside the timed request path. Configure the
 evidence envelope with `DEMO_RUN_ID`, `DEPLOYMENT_ID`, and `GIT_SHA`; tests can set
 `TELEMETRY_DATABASE` to isolate records. This is a local OpenTelemetry stand-in, not
 a full implementation of OTLP spans, context propagation, sampling, or exporters.
@@ -34,6 +37,16 @@ a full implementation of OTLP spans, context propagation, sampling, or exporters
 five-minute service health, recent request activity, active-incident count, and
 telemetry delivery counters. Observability and health-check requests are persisted
 but excluded from workload latency and request-rate calculations.
+
+Generate controlled traffic against the healthy supplier join with:
+
+```sh
+python3 scripts/generate-traffic.py --rate 5 --duration 60 --concurrency 10
+```
+
+The generator schedules requests at a fixed rate, uses trace IDs, permits concurrent
+in-flight work, surfaces missed schedules and failures, and reports mean and p95
+client latency. It does not create incidents or mutate application data.
 
 Tests use a real MongoDB and create/drop only randomly named `blackbox_test_*` databases:
 

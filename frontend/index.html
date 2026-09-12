@@ -27,8 +27,8 @@
     <p id="notice" class="notice" role="status"></p>
     <div class="table-wrap">
       <table>
-        <thead><tr><th scope="col">Item</th><th scope="col">SKU</th><th scope="col">Status</th><th scope="col" class="number">Stock</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-        <tbody id="inventory"><tr><td colspan="5" class="empty">Loading inventory...</td></tr></tbody>
+        <thead><tr><th scope="col">Item</th><th scope="col">SKU</th><th scope="col">Supplier</th><th scope="col">Status</th><th scope="col" class="number">Stock</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+        <tbody id="inventory"><tr><td colspan="6" class="empty">Loading inventory...</td></tr></tbody>
       </table>
     </div>
     <footer class="table-footer"><span id="result-count">-- items</span><span id="last-updated">Awaiting connection</span></footer>
@@ -38,6 +38,8 @@
       <div class="dialog-heading"><h2 id="dialog-title">Add item</h2><button id="close-dialog" class="icon-button" type="button" title="Close" aria-label="Close"><img src="/static/assets/icons/x.svg" alt=""></button></div>
       <label>Item name<input id="item-name" name="name" required maxlength="100" autocomplete="off"></label>
       <label>SKU<input id="item-sku" name="sku" required maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_\-]*" autocomplete="off" placeholder="e.g. KEY-006"></label>
+      <label>Supplier<input id="item-supplier" name="supplier" list="supplier-options" required maxlength="100" autocomplete="off" placeholder="Choose or type a new supplier"><span class="field-hint">Choose an existing supplier or type a new name to create one.</span></label>
+      <datalist id="supplier-options"></datalist>
       <label>Stock<input id="item-stock" name="stock" type="number" required min="0" max="1000000" step="1" value="0"></label>
       <p id="form-error" class="form-error" role="alert"></p>
       <div class="dialog-actions"><button id="cancel-dialog" type="button">Cancel</button><button id="save-item" class="primary" type="submit">Add item</button></div>
@@ -46,8 +48,8 @@
   <template id="item-row">
     <tr>
       <td><div class="item-name"><span class="item-icon"><img alt="" width="22" height="22"></span><span class="name"></span></div></td>
-      <td class="sku"></td><td><span class="stock-status"></span></td><td class="number stock"></td>
-      <td class="actions"><button class="icon-button edit-item" type="button"><img src="/static/assets/icons/pencil.svg" alt=""></button></td>
+      <td class="sku"></td><td class="supplier"></td><td><span class="stock-status"></span></td><td class="number stock"></td>
+      <td class="actions"><button class="icon-button edit-item" type="button"><img src="/static/assets/icons/pencil.svg" alt=""></button><button class="icon-button delete-item" type="button"><img src="/static/assets/icons/trash.svg" alt=""></button></td>
     </tr>
   </template>
 </body>
