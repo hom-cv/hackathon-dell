@@ -70,6 +70,7 @@ The MVP focuses on one complete loop: **detect → investigate → diagnose → 
 - [`backend/`](backend/) — inventory API and database integration tests.
 - [`frontend/`](frontend/) — basic inventory browser UI.
 - [`docs/mongodb-setup.md`](docs/mongodb-setup.md) — local setup, frontend integration, and GB10 deployment.
+- [`docs/incident-detection-test.md`](docs/incident-detection-test.md) — reproduce the healthy baseline, N+1 regression, and incident handoff.
 
 With Docker Engine and Compose available, run from the repository root:
 
