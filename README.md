@@ -511,9 +511,10 @@ That's the actual reasoning challenge.
 
 ---
 
-# 10. Detecting the incident should NOT use AI
+# 10. Incident detection should be AI-assisted
 
-Normal code should do this.
+Raw anomaly measurement should remain deterministic. Normal code should calculate
+metrics, compare them with known baselines, and emit anomaly signals.
 
 For example:
 
@@ -521,19 +522,31 @@ For example:
 BASELINE_P95 = 150
 
 if current_p95 > BASELINE_P95 * 3:
-    create_incident()
+    emit_anomaly_signal(
+        metric="latency_p95",
+        observed=current_p95,
+        baseline=BASELINE_P95,
+        severity="high",
+    )
 ```
 
-That code inserts:
+The AI-assisted detector then correlates that signal with recent deployments,
+logs, traces, and related anomalies. It decides whether the evidence represents a
+real incident, suppresses likely noise, and records its reasoning. When it detects
+an incident, it inserts:
 
 ```json
 {
   "incident_id": "INC-001",
-  "status": "new"
+  "status": "new",
+  "trigger": "latency_p95 exceeded 3x baseline",
+  "confidence": 0.94
 }
 ```
 
-into MongoDB.
+into MongoDB. Keep the AI decision bounded: provide structured signals and context,
+require structured output, and retain deterministic thresholds as a fallback for
+critical conditions.
 
 Then your Blackbox controller detects a new incident.
 
