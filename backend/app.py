@@ -332,34 +332,11 @@ def create_app(
 
     @app.get("/api/items", response_model=list[Item])
     def list_items(request: Request):
-        items = database_call(
+        return database_call(
             request,
-            "inventory-list",
-            lambda: list(
-                request.app.state.inventory.find({}, {"_id": 0}).sort("sku", 1)
-            ),
+            "inventory-with-supplier",
+            lambda: list(request.app.state.inventory.aggregate(ITEMS_WITH_SUPPLIERS_PIPELINE)),
         )
-
-        for item in items:
-            supplier_id = item.pop("supplier_id", None)
-            supplier = None
-            if supplier_id:
-                document = database_call(
-                    request,
-                    "supplier-by-id",
-                    lambda supplier_id=supplier_id: request.app.state.suppliers.find_one(
-                        {"_id": supplier_id},
-                        {"normalized_name": 0},
-                    ),
-                )
-                if document:
-                    supplier = {
-                        "id": document["_id"],
-                        "name": document["name"],
-                    }
-            item["supplier"] = supplier
-
-        return items
 
     @app.get("/api/suppliers", response_model=list[Supplier])
     def list_suppliers(request: Request):
