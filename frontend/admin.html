@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operations | Blackbox</title>
+  <link rel="icon" href="/static/assets/icons/package.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/admin" aria-label="Blackbox operations home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>Blackbox</span>
+    </a>
+    <div class="topbar-actions">
+      <span class="environment"><span aria-hidden="true"></span>Local environment</span>
+      <div class="avatar" aria-label="Operator profile">OP</div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Admin navigation">
+      <nav>
+        <p class="nav-label">OPERATIONS</p>
+        <a class="nav-item active" href="/admin" aria-current="page">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg>
+          Overview
+        </a>
+        <a class="nav-item" href="#incidents">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 3.8 2.4 17.2A2 2 0 0 0 4.1 20h15.8a2 2 0 0 0 1.7-2.8L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg>
+          Incidents
+        </a>
+        <a class="nav-item" href="#services">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Zm-8 9 8 4.5 8-4.5M4 16.5l8 4.5 8-4.5"/></svg>
+          Services
+        </a>
+        <a class="nav-item" href="#activity">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg>
+          Activity
+        </a>
+
+        <p class="nav-label secondary">WORKSPACE</p>
+        <a class="nav-item" href="/">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9ZM4 7.5l8 4.5m8-4.5L12 12m0 9v-9"/></svg>
+          Inventory
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="system-dot" aria-hidden="true"></span>
+        <div><strong>System status</strong><span id="system-status">Loading telemetry</span></div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="page-heading">
+        <div>
+          <p class="eyebrow">OPERATIONS CENTER</p>
+          <h1>Overview</h1>
+          <p class="subtitle">Monitor system health and coordinate incident response.</p>
+        </div>
+        <button class="refresh-button" id="refresh-dashboard" type="button">
+          <img src="/static/assets/icons/refresh-cw.svg" alt="">
+          Refresh
+        </button>
+      </div>
+
+      <section class="metrics" aria-label="System summary">
+        <article class="metric-card">
+          <div class="metric-heading"><span>Active incidents</span><span class="metric-icon alert" aria-hidden="true">!</span></div>
+          <strong id="active-incidents">—</strong>
+          <p id="incident-caption">Loading incident data</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-heading"><span>Healthy services</span><span class="metric-icon healthy" aria-hidden="true">✓</span></div>
+          <strong id="healthy-services">—</strong>
+          <p id="service-caption">Loading service checks</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-heading"><span>Average latency</span><span class="metric-icon latency" aria-hidden="true">↗</span></div>
+          <strong id="average-latency">—</strong>
+          <p>Over the last minute</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-heading"><span>Requests / min</span><span class="metric-icon requests" aria-hidden="true">⌁</span></div>
+          <strong id="requests-per-minute">—</strong>
+          <p>Workload API requests</p>
+        </article>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel incidents-panel" id="incidents">
+          <div class="panel-heading">
+            <div><h2>Active incidents</h2><p>Incidents requiring operator attention</p></div>
+            <button class="text-button" type="button" disabled>View all</button>
+          </div>
+          <div class="empty-state">
+            <span class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 8v4m0 4h.01M5.1 19h13.8c1.5 0 2.4-1.6 1.6-2.9L13.6 4.6a1.9 1.9 0 0 0-3.2 0L3.5 16.1C2.7 17.4 3.6 19 5.1 19Z"/></svg>
+            </span>
+            <h3>No incident data yet</h3>
+            <p>Detected incidents will appear here when monitoring is connected.</p>
+          </div>
+        </section>
+
+        <section class="panel services-panel" id="services">
+          <div class="panel-heading">
+            <div><h2>Service health</h2><p>Current state of monitored services</p></div>
+          </div>
+          <div class="service-placeholder" id="service-list" aria-label="Service data">
+            <div class="placeholder-row"><span class="skeleton circle"></span><span class="skeleton line long"></span><span class="skeleton pill"></span></div>
+            <div class="placeholder-row"><span class="skeleton circle"></span><span class="skeleton line medium"></span><span class="skeleton pill"></span></div>
+            <div class="placeholder-row"><span class="skeleton circle"></span><span class="skeleton line long"></span><span class="skeleton pill"></span></div>
+          </div>
+          <p class="placeholder-caption" id="service-list-caption">Loading persisted telemetry.</p>
+        </section>
+
+        <section class="panel activity-panel" id="activity">
+          <div class="panel-heading">
+            <div><h2>Recent activity</h2><p>Investigation and remediation timeline</p></div>
+          </div>
+          <div class="empty-state compact" id="activity-list">
+            <span class="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2m6-2a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"/></svg>
+            </span>
+            <h3>No activity recorded</h3>
+            <p>Investigation events and operator actions will be shown here.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/static/admin.js"></script>
+</body>
+</html>

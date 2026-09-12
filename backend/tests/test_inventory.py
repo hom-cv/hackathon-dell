@@ -24,7 +24,7 @@ def mongo():
 
 def test_create_update_and_persist_after_restart(mongo):
     uri, database, connection = mongo
-    with TestClient(create_app(uri, database)) as client:
+    with TestClient(create_app(uri, database, database)) as client:
         assert client.get("/api/health").json()["database"] == "connected"
         assert len(client.get("/api/items").json()) == 5
         response = client.post("/api/items", json={"sku": "test-001", "name": "Test item", "stock": 12})
@@ -34,7 +34,7 @@ def test_create_update_and_persist_after_restart(mongo):
         assert connection[database].inventory.find_one({"sku": "TEST-001"})["stock"] == 12
         assert client.patch("/api/items/test-001", json={"stock": 7}).json()["stock"] == 7
         assert client.patch("/api/items/KEY-001", json={"stock": 3}).status_code == 200
-    with TestClient(create_app(uri, database)) as client:
+    with TestClient(create_app(uri, database, database)) as client:
         items = {item["sku"]: item for item in client.get("/api/items").json()}
         assert items["TEST-001"]["stock"] == 7
         assert items["KEY-001"]["stock"] == 3
@@ -42,7 +42,7 @@ def test_create_update_and_persist_after_restart(mongo):
 
 def test_conflicts_and_invalid_input(mongo):
     uri, database, _ = mongo
-    with TestClient(create_app(uri, database)) as client:
+    with TestClient(create_app(uri, database, database)) as client:
         assert client.post("/api/items", json={"sku": "key-001", "name": "Duplicate", "stock": 1}).status_code == 409
         for stock in [-1, 1.5, True, "10", 1_000_001]:
             assert client.patch("/api/items/KEY-001", json={"stock": stock}).status_code == 422
@@ -59,7 +59,7 @@ def test_database_failure_is_reported(mongo):
         def find_one(self, *_args, **_kwargs):
             raise ServerSelectionTimeoutError("internal database details")
 
-    app = create_app(uri, database)
+    app = create_app(uri, database, database)
     with TestClient(app) as client:
         app.state.inventory = UnavailableInventory()
         response = client.get("/api/health")
@@ -70,8 +70,13 @@ def test_database_failure_is_reported(mongo):
 def test_frontend_and_explicit_cors(mongo, monkeypatch):
     uri, database, _ = mongo
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
-    with TestClient(create_app(uri, database)) as client:
+    with TestClient(create_app(uri, database, database)) as client:
         assert client.get("/").status_code == 200
+        admin = client.get("/admin")
+        assert admin.status_code == 200
+        assert "Operations | Blackbox" in admin.text
+        assert client.get("/static/admin.css").status_code == 200
+        assert client.get("/static/admin.js").status_code == 200
         assert client.get("/static/app.js").status_code == 200
         allowed = client.options("/api/items", headers={
             "Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST",
@@ -83,3 +88,45 @@ def test_frontend_and_explicit_cors(mongo, monkeypatch):
             "Origin": "http://unrelated.example", "Access-Control-Request-Method": "POST",
         })
         assert blocked.status_code == 400
+
+
+def test_api_requests_write_structured_telemetry(mongo):
+    uri, database, connection = mongo
+    app = create_app(uri, database, database)
+    with TestClient(app) as client:
+        response = client.get("/api/items", headers={"X-Trace-ID": "trace-test-001"})
+        assert response.status_code == 200
+        assert response.headers["X-Trace-ID"] == "trace-test-001"
+        app.state.telemetry.flush()
+
+        record = connection[database].logs.find_one({"trace_id": "trace-test-001"})
+        assert record["schema_version"] == 1
+        assert record["service"] == "inventory"
+        assert record["event"] == "request.completed"
+        assert record["http_method"] == "GET"
+        assert record["http_route"] == "/api/items"
+        assert record["status_code"] == 200
+        assert record["db_query_count"] == 1
+        assert record["duration_ms"] >= 0
+        assert record["error_type"] is None
+
+        assert client.get("/").status_code == 200
+        app.state.telemetry.flush()
+        assert connection[database].logs.count_documents({}) == 1
+
+
+def test_admin_overview_reads_persisted_telemetry(mongo):
+    uri, database, _ = mongo
+    app = create_app(uri, database, database)
+    with TestClient(app) as client:
+        assert client.get("/api/items").status_code == 200
+        app.state.telemetry.flush()
+
+        response = client.get("/api/admin/overview")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["summary"]["requests_per_minute"] == 1
+        assert body["summary"]["healthy_services"] == 1
+        assert body["services"][0]["id"] == "inventory"
+        assert body["activity"][0]["http_route"] == "/api/items"
+        assert body["telemetry"] == {"dropped_record_count": 0, "write_failure_count": 0}

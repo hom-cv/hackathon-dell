@@ -1,9 +1,11 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import quote_plus
+from uuid import uuid4
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -13,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymongo import MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
+
+from backend.telemetry import TelemetryWriter
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
@@ -62,7 +66,11 @@ SEED_ITEMS = [
 ]
 
 
-def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
+def create_app(
+    uri: str | None = None,
+    database: str | None = None,
+    telemetry_database: str | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         client = MongoClient(
@@ -82,8 +90,18 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
                 )
             app.state.mongo = client
             app.state.inventory = collection
+            evidence = client[telemetry_database or os.getenv("TELEMETRY_DATABASE", "blackbox")]
+            logs = evidence.logs
+            logs.create_index([("demo_run_id", 1), ("service", 1), ("timestamp", -1)])
+            logs.create_index("trace_id")
+            queue_size = max(1, int(os.getenv("TELEMETRY_QUEUE_SIZE", "10000")))
+            app.state.telemetry = TelemetryWriter(logs, queue_size=queue_size)
+            app.state.evidence = evidence
+            app.state.telemetry.start()
             yield
         finally:
+            if telemetry := getattr(app.state, "telemetry", None):
+                telemetry.close()
             client.close()
 
     app = FastAPI(title="Blackbox Inventory API", lifespan=lifespan)
@@ -94,6 +112,52 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
             allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type"],
         )
 
+    @app.middleware("http")
+    async def record_request(request: Request, call_next):
+        if not (request.url.path.startswith("/api/") or request.url.path == "/healthz"):
+            return await call_next(request)
+
+        trace_id = request.headers.get("x-trace-id") or uuid4().hex
+        request.state.db_query_count = 0
+        started_at = datetime.now(timezone.utc)
+        started = perf_counter()
+        status_code = 500
+        error_type = None
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            if status_code >= 400:
+                error_type = f"HTTP_{status_code}"
+            response.headers["X-Trace-ID"] = trace_id
+            return response
+        except Exception as exc:
+            error_type = type(exc).__name__
+            raise
+        finally:
+            duration_ms = (perf_counter() - started) * 1000
+            level = "ERROR" if status_code >= 500 else "WARNING" if status_code >= 400 else "INFO"
+            request.app.state.telemetry.record(
+                {
+                    "_id": uuid4().hex,
+                    "schema_version": 1,
+                    "demo_run_id": os.getenv("DEMO_RUN_ID", "local"),
+                    "timestamp": datetime.now(timezone.utc),
+                    "started_at": started_at,
+                    "service": "inventory",
+                    "deployment_id": os.getenv("DEPLOYMENT_ID", "inventory-local"),
+                    "git_sha": os.getenv("GIT_SHA", "unknown"),
+                    "trace_id": trace_id,
+                    "event": "request.completed",
+                    "level": level,
+                    "duration_ms": round(duration_ms, 3),
+                    "status_code": status_code,
+                    "db_query_count": request.state.db_query_count,
+                    "error_type": error_type,
+                    "http_method": request.method,
+                    "http_route": request.url.path,
+                }
+            )
+
     @app.exception_handler(PyMongoError)
     async def database_error(_request: Request, exc: PyMongoError):
         logger.error("MongoDB operation failed: %s", type(exc).__name__)
@@ -102,11 +166,13 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
     @app.get("/healthz", include_in_schema=False)
     @app.get("/api/health")
     def health(request: Request):
+        request.state.db_query_count += 1
         request.app.state.inventory.find_one({}, {"_id": 1})
         return {"status": "ok", "database": "connected"}
 
     @app.get("/api/items", response_model=list[Item])
     def list_items(request: Request):
+        request.state.db_query_count += 1
         return list(request.app.state.inventory.find({}, {"_id": 0}).sort("sku", 1))
 
     @app.post("/api/items", response_model=Item, status_code=201)
@@ -114,6 +180,7 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
         now = datetime.now(timezone.utc)
         document = {**item.model_dump(), "created_at": now, "updated_at": now}
         try:
+            request.state.db_query_count += 1
             request.app.state.inventory.insert_one(document.copy())
         except DuplicateKeyError:
             raise HTTPException(409, "An item with that SKU already exists.") from None
@@ -121,6 +188,7 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
 
     @app.patch("/api/items/{sku}", response_model=Item)
     def update_stock(sku: str, update: StockUpdate, request: Request):
+        request.state.db_query_count += 1
         document = request.app.state.inventory.find_one_and_update(
             {"sku": sku.upper()},
             {"$set": {"stock": update.stock, "updated_at": datetime.now(timezone.utc)}},
@@ -130,9 +198,87 @@ def create_app(uri: str | None = None, database: str | None = None) -> FastAPI:
             raise HTTPException(404, "Item not found.")
         return document
 
+    @app.get("/api/admin/overview")
+    def admin_overview(request: Request):
+        """Return a read-only dashboard view derived from persisted evidence."""
+        now = datetime.now(timezone.utc)
+        run_id = os.getenv("DEMO_RUN_ID", "local")
+        workload_filter = {
+            "demo_run_id": run_id,
+            "http_route": {"$nin": ["/api/health", "/api/admin/overview", "/healthz"]},
+        }
+        recent_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=1)}}
+        service_filter = {**workload_filter, "timestamp": {"$gte": now - timedelta(minutes=5)}}
+
+        request.state.db_query_count += 1
+        minute_logs = list(request.app.state.evidence.logs.find(recent_filter, {"_id": 0}))
+
+        request.state.db_query_count += 1
+        service_rows = list(request.app.state.evidence.logs.aggregate([
+            {"$match": service_filter},
+            {"$group": {
+                "_id": "$service",
+                "request_count": {"$sum": 1},
+                "error_count": {"$sum": {"$cond": [{"$gte": ["$status_code", 500]}, 1, 0]}},
+                "average_latency_ms": {"$avg": "$duration_ms"},
+                "last_seen_at": {"$max": "$timestamp"},
+            }},
+            {"$sort": {"_id": 1}},
+        ]))
+
+        request.state.db_query_count += 1
+        activity = list(
+            request.app.state.evidence.logs.find(workload_filter, {"_id": 0})
+            .sort("timestamp", -1)
+            .limit(20)
+        )
+
+        request.state.db_query_count += 1
+        active_incidents = request.app.state.evidence.incidents.count_documents(
+            {"demo_run_id": run_id, "state": {"$ne": "resolved"}}
+        )
+
+        services = []
+        for row in service_rows:
+            error_rate = row["error_count"] / row["request_count"]
+            services.append({
+                "id": row["_id"],
+                "name": row["_id"].replace("_", " ").title(),
+                "status": "degraded" if error_rate > 0.01 else "healthy",
+                "request_count": row["request_count"],
+                "error_rate": error_rate,
+                "average_latency_ms": round(row["average_latency_ms"], 2),
+                "last_seen_at": row["last_seen_at"],
+            })
+
+        average_latency = (
+            round(sum(record["duration_ms"] for record in minute_logs) / len(minute_logs), 2)
+            if minute_logs else None
+        )
+        return {
+            "generated_at": now,
+            "demo_run_id": run_id,
+            "summary": {
+                "active_incidents": active_incidents,
+                "healthy_services": sum(service["status"] == "healthy" for service in services),
+                "average_latency_ms": average_latency,
+                "requests_per_minute": len(minute_logs),
+            },
+            "services": services,
+            "activity": activity,
+            "telemetry": {
+                "dropped_record_count": request.app.state.telemetry.dropped_record_count,
+                "write_failure_count": request.app.state.telemetry.write_failure_count,
+            },
+        }
+
     @app.get("/", include_in_schema=False)
     def frontend():
         return FileResponse(ROOT / "frontend" / "index.html")
+
+    @app.get("/admin", include_in_schema=False)
+    def admin_dashboard():
+        return FileResponse(ROOT / "frontend" / "admin.html")
 
     app.mount("/static", StaticFiles(directory=ROOT / "frontend"), name="static")
     return app

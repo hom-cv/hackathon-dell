@@ -22,6 +22,19 @@ python3 -m venv .venv
 
 `MONGODB_URI` overrides the individual `MONGO_*` connection settings. Keep it server-side. Use `CORS_ORIGINS=http://localhost:5173` when connecting a separately served frontend; the included UI needs no CORS configuration.
 
+Each request to `/api/*` or `/healthz` writes one structured completion record to
+`blackbox.logs`. The record includes a trace ID (accepting an incoming `X-Trace-ID`),
+latency, status, route, deployment metadata, and database-query count, but no request
+or response body. Writes are buffered outside the timed request path. Configure the
+evidence envelope with `DEMO_RUN_ID`, `DEPLOYMENT_ID`, and `GIT_SHA`; tests can set
+`TELEMETRY_DATABASE` to isolate records. This is a local OpenTelemetry stand-in, not
+a full implementation of OTLP spans, context propagation, sampling, or exporters.
+
+`GET /api/admin/overview` provides the `/admin` dashboard with a read-only summary,
+five-minute service health, recent request activity, active-incident count, and
+telemetry delivery counters. Observability and health-check requests are persisted
+but excluded from workload latency and request-rate calculations.
+
 Tests use a real MongoDB and create/drop only randomly named `blackbox_test_*` databases:
 
 ```sh
