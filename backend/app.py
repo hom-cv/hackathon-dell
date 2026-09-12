@@ -259,7 +259,7 @@ def create_app(
                 telemetry.close()
             client.close()
 
-    app = FastAPI(title="Blackbox Inventory API", lifespan=lifespan)
+    app = FastAPI(title="Healbot Inventory API", lifespan=lifespan)
     origins = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
     if origins:
         app.add_middleware(

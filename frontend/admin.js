@@ -33,7 +33,7 @@ function renderServices(services) {
     return row;
   });
   list.replaceChildren(...rows);
-  $("#service-list-caption").textContent = "Five-minute service window from blackbox.logs.";
+  $("#service-list-caption").textContent = "Five-minute service window from Healbot telemetry.";
 }
 
 function renderIncidents(incidents) {

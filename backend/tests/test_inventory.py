@@ -116,10 +116,13 @@ def test_frontend_and_explicit_cors(mongo, monkeypatch):
     uri, database, _ = mongo
     monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
     with TestClient(create_app(uri, database, database)) as client:
-        assert client.get("/").status_code == 200
+        inventory = client.get("/")
+        assert inventory.status_code == 200
+        assert "Inventory | Healbot" in inventory.text
         admin = client.get("/admin")
         assert admin.status_code == 200
-        assert "Operations | Blackbox" in admin.text
+        assert "Operations | Healbot" in admin.text
+        assert client.get("/openapi.json").json()["info"]["title"] == "Healbot Inventory API"
         assert client.get("/static/admin.css").status_code == 200
         assert client.get("/static/admin.js").status_code == 200
         assert client.get("/static/app.js").status_code == 200
